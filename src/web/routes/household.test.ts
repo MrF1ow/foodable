@@ -3932,9 +3932,11 @@ describe("household settings sub-pages", () => {
                 "Location",
                 "Time zone",
                 "Stores",
+                "Fridge places",
                 "Restock day",
                 "Invite codes",
                 "Recipe link readers",
+                "Plurals are the same food",
             ]);
             expect(items(html)).toEqual([
                 "Rename household",
@@ -3944,7 +3946,8 @@ describe("household settings sub-pages", () => {
             ]);
             expect(html).toContain('action="/settings/household/rotate-token"');
             expect(html).not.toContain("Dismissed notices");
-            expect(html).not.toContain("plurals-same-food");
+            // One switch row posts to the plurals route; no block, no sheet.
+            expect(html.split("plurals-same-food")).toHaveLength(2);
             expect(html).not.toContain("Social post readers");
         });
 

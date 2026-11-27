@@ -9,7 +9,6 @@ import { withAnalytics } from "../../analytics.js";
 import { lookupBarcode } from "../../foods.js";
 import {
     addLocation,
-    deleteLocation,
     FridgeInputError,
     listFridge,
     moveItem,
@@ -27,6 +26,7 @@ import {
     fridgeEatLogsMeal,
     fridgeNotices,
     listExpiring,
+    removeFridgeLocation,
     StockInputError,
     updateFridgeItemQuantityAdjust,
 } from "../../domain/stock.js";
@@ -372,11 +372,15 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                                         .map((item) => item.id),
                                 ),
                             );
-                            const deleted = await deleteLocation(
-                                store,
-                                householdId,
-                                args.id,
-                            );
+                            // Each item leaves through the stock ledger (one
+                            // adjust movement each), then the place goes.
+                            const { removed: deleted } =
+                                await removeFridgeLocation(
+                                    store,
+                                    liveStockStore(),
+                                    liveFoodsStore(),
+                                    { householdId, locationId: args.id },
+                                );
                             return {
                                 value: { deleted },
                                 summary: `Deleted fridge location ${location?.name ?? args.id}${items > 0 ? ` and its ${items} item${items === 1 ? "" : "s"}` : ""}${uncapturedNote(report.uncaptured)}`,

@@ -18,6 +18,7 @@ import {
 } from "../db/profiles.js";
 import {
     getHouseholdConfig,
+    getPluralsSameFood,
     getHouseholdMembership,
     householdExists,
     listHouseholdMembers,
@@ -1634,12 +1635,15 @@ export async function renderHouseholdSettingsRoute(
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
     const householdId = gate.viewer.householdId;
-    const [config, listed, stores, location] = await Promise.all([
-        getHouseholdConfig(householdId),
-        listHouseholdMembers(householdId),
-        liveSettingsStore().listStores(householdId),
-        liveSettingsStore().getLocation(householdId),
-    ]);
+    const [config, listed, stores, location, places, plurals] =
+        await Promise.all([
+            getHouseholdConfig(householdId),
+            listHouseholdMembers(householdId),
+            liveSettingsStore().listStores(householdId),
+            liveSettingsStore().getLocation(householdId),
+            liveFridgeStore().listLocations(householdId),
+            getPluralsSameFood(householdId),
+        ]);
     const members = ownerFirst(listed);
     // oxlint-disable-next-line foodable/no-raw-role-check -- finds the owner's row; a data lookup, not a permission decision
     const ownerId = members.find((m) => m.role === "owner")?.userId;
@@ -1681,6 +1685,8 @@ export async function renderHouseholdSettingsRoute(
             householdName: config.name,
             members,
             storeCount: stores.length,
+            placeCount: places.length,
+            pluralsSameFood: plurals,
             isOwner: can(gate.viewer, "household.owner_only").ok,
             canManage: canManageHousehold(gate.viewer),
             canInvite: can(gate.viewer, "member.manage").ok,

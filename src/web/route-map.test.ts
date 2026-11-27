@@ -30,6 +30,20 @@ describe("APP_PATHS", () => {
     });
 });
 
+describe("Fridge places path", () => {
+    test("lives under Household, is canonical and is not moved", () => {
+        expect(APP_PATHS.settingsPlaces).toBe("/settings/household/places");
+        expect(legacyRedirectTarget(APP_PATHS.settingsPlaces)).toBeNull();
+        expect(
+            legacyRedirectTarget(`${APP_PATHS.settingsPlaces}/p1/remove`),
+        ).toBeNull();
+        // The old Household prefix carries it onto the canonical path.
+        expect(legacyRedirectTarget("/household/places")).toBe(
+            APP_PATHS.settingsPlaces,
+        );
+    });
+});
+
 describe("legacyRedirectTarget", () => {
     const cases: { in: string; want: string | null }[] = [
         { in: "/fridge", want: APP_PATHS.kitchenFridge },

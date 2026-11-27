@@ -52,6 +52,7 @@ import {
     isCookPreviewUnavailable,
     StockInputError,
     putAwayGroceryLines,
+    removeFridgeLocation,
     updateFridgeItemQuantityAdjust,
     type StockMovement,
 } from "./stock.js";
@@ -932,6 +933,65 @@ test("manual delete writes an adjust movement and the ledger matches stock", asy
             itemId: added.item!.id,
         }),
     ).toBe(false);
+});
+
+test("removeFridgeLocation deletes the place's items with one adjust movement each and keeps the ledger whole", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const freezer = await addLocation(fridge, HH, "Freezer");
+    const pantry = await addLocation(fridge, HH, "Pantry");
+    const peas = await findOrCreateManualFood(foods, HH, "food", "Peas");
+    const rice = await findOrCreateManualFood(foods, HH, "food", "Rice");
+    const keep = await findOrCreateManualFood(foods, HH, "food", "Salt");
+    for (const [food, loc, amount] of [
+        [peas, freezer, 100],
+        [rice, freezer, 200],
+        [keep, pantry, 50],
+    ] as const) {
+        await addFridgeItemAdjust(fridge, stock, foods, {
+            householdId: HH,
+            foodId: food.id,
+            amount,
+            unit: "g",
+            locationId: loc.id,
+        });
+    }
+    const before = new Set(
+        (await stock.listMovements(HH)).map((row) => row.id),
+    );
+    expect(
+        await removeFridgeLocation(fridge, stock, foods, {
+            householdId: HH,
+            locationId: freezer.id,
+            actorUserId: "u1",
+        }),
+    ).toEqual({ removed: true, items: 2 });
+    const left = await listFridge(fridge, HH);
+    expect(left.locations.map((row) => row.name)).toEqual(["Pantry"]);
+    expect(left.items.map((row) => row.displayName)).toEqual(["Salt"]);
+    const movements = await stock.listMovements(HH);
+    const added = movements.filter((row) => !before.has(row.id));
+    expect(added).toHaveLength(2);
+    expect(added.every((row) => row.reason === "adjust")).toBe(true);
+    expect(added.map((row) => row.delta).sort((a, b) => a - b)).toEqual([
+        -200, -100,
+    ]);
+    for (const food of [peas, rice, keep]) {
+        expect(
+            ledgerMatchesStock(
+                left.items.filter((item) => item.foodId === food.id),
+                movements.filter((row) => row.foodId === food.id),
+                food,
+            ),
+        ).toBe(true);
+    }
+    expect(
+        await removeFridgeLocation(fridge, stock, foods, {
+            householdId: HH,
+            locationId: freezer.id,
+        }),
+    ).toEqual({ removed: false, items: 0 });
 });
 
 test("manual update rejects an amount that rounds to zero", async () => {

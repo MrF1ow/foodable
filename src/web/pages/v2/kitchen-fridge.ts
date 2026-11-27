@@ -33,6 +33,7 @@ import { searchField } from "../../components/v2/search-field.js";
 import { sectionHeader } from "../../components/v2/section-header.js";
 import { sheet, sheetSection } from "../../components/v2/sheet.js";
 import { stepperControl } from "../../components/v2/stepper-control.js";
+import { APP_PATHS } from "../../route-map.js";
 import { renderAppShell } from "../../shell.js";
 import { formatExpiryWhen } from "./expiry-format.js";
 import { renderKitchenHead, kitchenTopTools } from "./kitchen-head.js";
@@ -715,7 +716,12 @@ export function renderKitchenFridgeBody(view: KitchenFridgeV2View): string {
         view.locations.length === 0
             ? emptyState({
                   title: "No places yet",
-                  body: "Add a location, then add items with the button above.",
+                  body: "Add a place in Settings, then add items with the button above.",
+                  action: button({
+                      label: "Fridge places",
+                      variant: "secondary",
+                      href: APP_PATHS.settingsPlaces,
+                  }),
               })
             : view.items.length === 0
               ? emptyState({ title: "Nothing in the fridge yet" })

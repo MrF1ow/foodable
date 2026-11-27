@@ -134,6 +134,11 @@ import { renderSettingsGoalsV2Page } from "../src/web/pages/v2/settings-goals.js
 import { goalsDraftFrom } from "../src/web/pages/v2/settings-goals-form.js";
 import { renderSettingsSavedV2Page } from "../src/web/pages/v2/settings-saved.js";
 import {
+    PLACES_ADD_ID,
+    placeRemoveSheetId,
+    renderSettingsPlacesV2Page,
+} from "../src/web/pages/v2/settings-places.js";
+import {
     renderSettingsStoresV2Page,
     STORES_ADD_ID,
 } from "../src/web/pages/v2/settings-stores.js";
@@ -223,6 +228,12 @@ const PREVIEW_STORE_SUMMARIES = [
     { id: "s-costco", name: "Costco", sectionCount: 6, lineCount: 5 },
     { id: "s-trader", name: "Trader Joe's", sectionCount: 5, lineCount: 3 },
     { id: "s-market", name: "Farmers market", sectionCount: 0, lineCount: 0 },
+];
+// Fridge places: the three places of the preview fridge, one holding a dozen items.
+const PREVIEW_PLACE_SUMMARIES = [
+    { id: "p-fridge", name: "Fridge", itemCount: 12 },
+    { id: "p-freezer", name: "Freezer", itemCount: 1 },
+    { id: "p-pantry", name: "Pantry", itemCount: 0 },
 ];
 const PREVIEW_COSTCO_SECTIONS = [
     ["Produce", 0],
@@ -1785,6 +1796,8 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             householdName: "The Flow household",
             members: [ME, SAM, JORDAN, RILEY, ALEX] as never,
             storeCount: PREVIEW_STORES.length,
+            placeCount: 3,
+            pluralsSameFood: false,
             isOwner: true,
             canManage: true,
             canInvite: true,
@@ -3216,6 +3229,28 @@ for (const day of ["1", "3", "5"]) document.querySelector('#fd-recipe-plan-sheet
             socialReaders: { tiktok: true, facebook: false },
             blockedCount: 0,
             isOwner: false,
+            canManage: false,
+        }),
+        "settings-places": renderSettingsPlacesV2Page({
+            chrome,
+            places: PREVIEW_PLACE_SUMMARIES,
+            canManage: true,
+        }),
+        "settings-places-add": renderSettingsPlacesV2Page({
+            chrome,
+            places: PREVIEW_PLACE_SUMMARIES,
+            canManage: true,
+            open: PLACES_ADD_ID,
+        }),
+        "settings-places-remove": renderSettingsPlacesV2Page({
+            chrome,
+            places: PREVIEW_PLACE_SUMMARIES,
+            canManage: true,
+            open: placeRemoveSheetId("p-fridge"),
+        }),
+        "settings-places-member": renderSettingsPlacesV2Page({
+            chrome,
+            places: PREVIEW_PLACE_SUMMARIES,
             canManage: false,
         }),
         "settings-stores": renderSettingsStoresV2Page({

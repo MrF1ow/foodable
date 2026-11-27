@@ -36,6 +36,7 @@ import {
 } from "../src/web/pages/v2/settings-household-shared-links.js";
 import { renderHouseholdTokenPage } from "../src/web/pages/v2/settings-household-token.js";
 import { renderSettingsRestockV2Page } from "../src/web/pages/v2/settings-restock.js";
+import { renderSettingsPlacesV2Page } from "../src/web/pages/v2/settings-places.js";
 import { renderSettingsStoresV2Page } from "../src/web/pages/v2/settings-stores.js";
 import { renderSettingsStoreV2Page } from "../src/web/pages/v2/settings-stores-detail.js";
 import { renderSettingsReadersV2Page } from "../src/web/pages/v2/settings-readers.js";
@@ -325,6 +326,12 @@ function storesFixture(
     });
 }
 
+const FIXTURE_PLACES = [
+    { id: "p-fridge", name: "Fridge", itemCount: 12 },
+    { id: "p-freezer", name: "Freezer", itemCount: 1 },
+    { id: "p-pantry", name: "Pantry", itemCount: 0 },
+];
+
 const COSTCO_SECTIONS = [
     ["sec-produce", "Produce"],
     ["sec-meat", "Meat"],
@@ -524,6 +531,8 @@ function householdPage(chrome: ReturnType<typeof fixtureChrome>) {
         householdName: "The Flow household",
         members: [ME, SAM, RILEY],
         storeCount: 0,
+        placeCount: 3,
+        pluralsSameFood: false,
         location: null,
         householdTimezone: null,
         effectiveTimezone: "UTC",
@@ -1817,6 +1826,11 @@ async function pages(
             restock: FIXTURE_RESTOCK,
             canManage: true,
         }),
+        "household-places": renderSettingsPlacesV2Page({
+            chrome: chrome as never,
+            places: FIXTURE_PLACES,
+            canManage: true,
+        }),
         "household-stores": storesFixture(chrome),
         "household-stores-reorder": storesFixture(chrome, { reorder: true }),
         "household-store": storeFixture(chrome),
@@ -2015,6 +2029,7 @@ const ROUTE_BASE: Record<string, string> = {
     [`/settings/household/members/${SAM.userId}`]: "household-member",
     "/settings/household/invites": "household-invites",
     "/settings/household/restock": "household-restock",
+    "/settings/household/places": "household-places",
     "/settings/household/stores": "household-stores",
     "/settings/household/stores?reorder=1": "household-stores-reorder",
     "/settings/household/stores/s-costco": "household-store",

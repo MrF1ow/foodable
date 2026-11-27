@@ -135,6 +135,8 @@ describe("Household member rows", () => {
             householdName: "Home",
             members: MEMBERS,
             storeCount: 0,
+            placeCount: 0,
+            pluralsSameFood: false,
             location: null,
             householdTimezone: null,
             effectiveTimezone: "UTC",

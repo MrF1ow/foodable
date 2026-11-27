@@ -5838,6 +5838,99 @@ try {
         },
     );
 
+    // Settings › Household › Fridge places: a Turbo visit from the Household
+    // row; a row's ⋯ has Remove, which opens a dialog that names the item count
+    // and posts the removal; the plurals switch on Household posts its route.
+    // All over Turbo, with no document load and no toast.
+    await control("session=app&theme=dark&reset=posts&post=ok");
+    await goto("/settings/household");
+    await setMarker();
+    await control("reset=posts");
+    await clickSel(
+        '.fd-settings form[action="/settings/household/plurals-same-food"] button',
+    );
+    await sleep(600);
+    const pluralsPosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/household/plurals-same-food",
+    );
+    const afterPlurals = await ev<{ marker: string | null; toasts: number }>(`({
+        marker: window.__marker ?? null,
+        toasts: document.querySelectorAll(".toast-item").length,
+    })`);
+    await clickSel('.fd-settings a[href="/settings/household/places"]');
+    await sleep(500);
+    const placesPage = await ev<{
+        path: string;
+        marker: string | null;
+        title: string | null;
+        rows: string[];
+        optOuts: number;
+        chevrons: number;
+    }>(`({
+        path: location.pathname + location.search,
+        marker: window.__marker ?? null,
+        title: document.querySelector(".fd-settings-detail .fd-detail-bar__title")?.textContent ?? null,
+        rows: [...document.querySelectorAll(".fd-settings .fd-item-row__title")].map((e) => e.textContent),
+        optOuts: document.querySelectorAll('.fd-settings [data-turbo="false"]').length,
+        chevrons: document.querySelectorAll(".fd-settings .fd-item-row__chevron").length,
+    })`);
+    await clickSel(".fd-settings .fd-item-row .fd-menu [data-fd-menu-trigger]");
+    await sleep(200);
+    await clickSel(".fd-settings .fd-menu__panel .fd-menu__item--danger");
+    await sleep(300);
+    const removeDialog = await ev<{ open: number; text: string }>(`(() => {
+        const dialog = document.querySelector(".fd-settings dialog[open]");
+        return {
+            open: document.querySelectorAll(".fd-settings dialog[open]").length,
+            text: dialog?.querySelector(".fd-sheet__text")?.textContent ?? "",
+        };
+    })()`);
+    await control("reset=posts");
+    await clickSel('.fd-settings dialog[open] button[type="submit"]');
+    await sleep(600);
+    const placeRemovePosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/household/places/p-fridge/remove",
+    );
+    const afterRemove = await ev<{
+        path: string;
+        marker: string | null;
+        toasts: number;
+    }>(`({
+        path: location.pathname + location.search,
+        marker: window.__marker ?? null,
+        toasts: document.querySelectorAll(".toast-item").length,
+    })`);
+    record(
+        "Settings › Household › Fridge places: a Turbo page from the Household row with no chevron on its rows; Remove (a row's ⋯) opens a dialog naming the item count and posts the removal; the plurals switch posts its route; no document load, no toast",
+        pluralsPosts.length === 1 &&
+            pluralsPosts[0]!.entries.some(
+                ([k, v]) => k === "plurals_same_food" && v === "true",
+            ) &&
+            afterPlurals.marker === "stay" &&
+            afterPlurals.toasts === 0 &&
+            placesPage.path === "/settings/household/places" &&
+            placesPage.marker === "stay" &&
+            placesPage.title === "Fridge places" &&
+            placesPage.rows.join("|") === "Fridge|Freezer|Pantry|Add a place" &&
+            placesPage.optOuts === 0 &&
+            placesPage.chevrons === 0 &&
+            removeDialog.open === 1 &&
+            removeDialog.text.startsWith("12 items are in Fridge.") &&
+            placeRemovePosts.length === 1 &&
+            afterRemove.path === "/settings/household/places" &&
+            afterRemove.marker === "stay" &&
+            afterRemove.toasts === 0,
+        {
+            pluralsPosts,
+            afterPlurals,
+            placesPage,
+            removeDialog,
+            placeRemovePosts,
+            afterRemove,
+            ex: drain(),
+        },
+    );
+
     // Settings › Household › Stores: a Turbo page; the default store is a
     // pull-down on the row; Reorder (the Detail bar's ⋯) turns the list into an
     // inline edit mode with a handle per row, a drag posts the whole order, and

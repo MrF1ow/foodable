@@ -210,6 +210,9 @@ describe("renderKitchenFridgeV2Page", () => {
         );
         expect(html).toContain("No places yet");
         expect(html).not.toContain('id="fd-fridge-add"');
+        // The way out is the Fridge places page, not a hint about agents.
+        expect(html).toContain('href="/settings/household/places"');
+        expect(html).toContain("Fridge places");
     });
 
     test("places that hold something are sections with a count, in order, none for an empty one", () => {

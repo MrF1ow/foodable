@@ -43,6 +43,10 @@ export type SettingsHouseholdV2View = {
     members: HouseholdMember[];
     /** How many stores the household has (the Stores row shows the count). */
     storeCount: number;
+    /** How many fridge places the household has (the Fridge places row shows the count). */
+    placeCount: number;
+    /** Whether 'avocado' and 'Avocados' are one food when names are matched. */
+    pluralsSameFood: boolean;
     isOwner: boolean;
     /** Owner or admin: edit the rows and add members. */
     canManage: boolean;
@@ -139,6 +143,12 @@ function householdRows(view: SettingsHouseholdV2View): Html[] {
             href: APP_PATHS.settingsStores,
         }),
         itemRow({
+            title: "Fridge places",
+            value: String(view.placeCount),
+            trailing: { kind: "chevron" },
+            href: APP_PATHS.settingsPlaces,
+        }),
+        itemRow({
             title: "Restock day",
             value: restockDayLabel(view.restock),
             trailing: { kind: "chevron" },
@@ -174,7 +184,38 @@ function householdRows(view: SettingsHouseholdV2View): Html[] {
             href: READERS_PATH,
         }),
     );
+    rows.push(pluralsRow(view));
     return rows;
+}
+
+export const PLURALS_PATH = "/settings/household/plurals-same-food";
+
+/** A switch for owners and admins; everyone else sees On or Off. */
+function pluralsRow(view: SettingsHouseholdV2View): Html {
+    const title = "Plurals are the same food";
+    const subtitle = "Importing avocado matches Avocados";
+    if (!view.canManage) {
+        return itemRow({
+            title,
+            subtitle,
+            value: view.pluralsSameFood ? "On" : "Off",
+        });
+    }
+    return itemRow({
+        title,
+        subtitle,
+        trailing: {
+            kind: "toggle",
+            on: view.pluralsSameFood,
+            label: title,
+            form: {
+                action: PLURALS_PATH,
+                fields: {
+                    plurals_same_food: view.pluralsSameFood ? "false" : "true",
+                },
+            },
+        },
+    });
 }
 
 /** One-field edit sheet: the field in a form, Save in the action row. */

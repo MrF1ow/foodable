@@ -17851,7 +17851,7 @@ describe("authenticated dashboard HTTP", () => {
             '<a class="fd-kitchen-tab" href="/kitchen/fridge" aria-current="page">Fridge</a>',
         );
         expect(html).toContain(
-            "Add a location, then add items with the button above.",
+            "Add a place in Settings, then add items with the button above.",
         );
         expect(html).not.toContain("Coming soon.");
         expect(html).not.toContain('class="facts"');
