@@ -5417,8 +5417,9 @@ try {
     );
 
     // Settings › Household on the phone: a member's row opens their page over
-    // Turbo, the ⋯ menu holds the member actions, Remove confirms inside the
-    // menu (no dialog) and posts over Turbo, and Make owner opens a bottom sheet.
+    // Turbo. The page has no ⋯: the Role row is a drop-down (Member, Admin,
+    // Owner) whose Admin posts over Turbo and whose Owner opens a bottom sheet,
+    // and Remove is a red row at the bottom that opens its own confirm sheet.
     await control("session=app&theme=dark&reset=posts&post=ok");
     await goto("/settings/household");
     await setMarker();
@@ -5430,78 +5431,126 @@ try {
         page: string | null;
         rows: string[];
         back: string | null;
+        barMenus: number;
+        menus: number;
+        roleChevron: boolean;
+        removeIsLast: boolean;
+        removeRed: boolean;
     }>(`({
         path: location.pathname,
         marker: window.__marker ?? null,
         page: document.querySelector(".fd-settings")?.getAttribute("data-fd-settings-page") ?? null,
         rows: [...document.querySelectorAll(".fd-settings .fd-item-row__title")].map((e) => e.textContent),
         back: document.querySelector(".fd-settings-detail a[aria-label='Back']")?.getAttribute("href") ?? null,
+        barMenus: document.querySelectorAll(".fd-settings-detail [data-fd-menu-trigger], .fd-settings-page-head__actions [data-fd-menu-trigger]").length,
+        menus: document.querySelectorAll(".fd-settings [data-fd-menu-trigger]").length,
+        roleChevron: !!document.querySelector(".fd-settings .fd-menu--row .fd-icon--chevron-right"),
+        removeIsLast: (() => {
+            const rows = [...document.querySelectorAll(".fd-settings .fd-item-row")];
+            return rows[rows.length - 1]?.querySelector(".fd-item-row__title")?.textContent === "Remove Sam";
+        })(),
+        removeRed: (() => {
+            const t = [...document.querySelectorAll(".fd-settings .fd-item-row--danger .fd-item-row__title")].find((e) => e.textContent === "Remove Sam");
+            return !!t && getComputedStyle(t).color !== getComputedStyle(document.body).color;
+        })(),
     })`);
-    await clickSel(".fd-settings-detail [data-fd-menu-trigger]");
+    await clickSel(".fd-settings .fd-menu--row [data-fd-menu-trigger]");
     await sleep(200);
     const memberMenu = await ev<{
         open: boolean;
         items: string[];
         dialogs: number;
     }>(`({
-        open: !document.querySelector(".fd-settings-detail .fd-menu__panel").hidden,
-        items: [...document.querySelectorAll(".fd-settings-detail .fd-menu__panel > .fd-menu__form .fd-menu__label, .fd-settings-detail .fd-menu__panel > button .fd-menu__label, .fd-settings-detail .fd-menu__panel > .fd-menu__confirm > [data-fd-menu-arm] .fd-menu__label")].map((e) => e.textContent),
-        dialogs: document.querySelectorAll("dialog[open]").length,
-    })`);
-    await clickSel(".fd-settings-detail [data-fd-menu-arm]");
-    await sleep(150);
-    const removeArmed = await ev<{
-        confirm: string[];
-        dialogs: number;
-    }>(`({
-        confirm: [...document.querySelectorAll(".fd-settings-detail .fd-menu__confirm-row:not([hidden]) .fd-menu__label")].map((e) => e.textContent),
+        open: !document.querySelector(".fd-settings .fd-menu--row .fd-menu__panel").hidden,
+        items: [...document.querySelectorAll(".fd-settings .fd-menu--row .fd-menu__label")].map((e) => e.textContent),
         dialogs: document.querySelectorAll("dialog[open]").length,
     })`);
     await control("reset=posts");
     await clickSel(
-        ".fd-settings-detail .fd-menu__confirm-row:not([hidden]) button[type=submit]",
+        '.fd-settings .fd-menu--row form[action$="/role"] button[type=submit]',
     );
     await sleep(500);
-    const removePosts = (await stats()).posts.filter(
-        (p) => p.path === "/settings/household/members/u2/remove",
+    const rolePosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/household/members/u2/role",
     );
-    const afterRemove = await ev<{ marker: string | null; path: string }>(`({
+    const afterRole = await ev<{ marker: string | null; path: string }>(`({
         marker: window.__marker ?? null,
         path: location.pathname,
     })`);
     record(
-        "Settings › Household: a member row opens their page over Turbo; the ⋯ menu has Make admin, Make owner and Remove, which confirms in the menu and posts over Turbo",
+        "Settings › Household: a member row opens their page over Turbo; it has no ⋯, its Role row is a drop-down of Member, Admin and Owner with no chevron, Admin posts the role over Turbo, and Remove is the red last row",
         memberPage.path === "/settings/household/members/u2" &&
             memberPage.marker === "stay" &&
             memberPage.page === "household" &&
-            memberPage.rows.join() === "Name,Role,Last active,Today" &&
+            memberPage.rows.join() ===
+                "Name,Role,Last active,Today,Remove Sam" &&
             memberPage.back === "/settings/household" &&
+            memberPage.barMenus === 0 &&
+            memberPage.menus === 1 &&
+            !memberPage.roleChevron &&
+            memberPage.removeIsLast &&
+            memberPage.removeRed &&
             memberMenu.open &&
-            memberMenu.items.join() === "Make admin,Make owner,Remove Sam" &&
+            memberMenu.items.join() === "Member,Admin,Owner" &&
             memberMenu.dialogs === 0 &&
-            removeArmed.confirm.join() === "Cancel,Remove Sam" &&
-            removeArmed.dialogs === 0 &&
-            removePosts.length === 1 &&
-            removePosts[0]!.entries.some(
-                ([k, v]) => k === "confirm" && v === "yes",
+            rolePosts.length === 1 &&
+            rolePosts[0]!.entries.some(
+                ([k, v]) => k === "role" && v === "admin",
             ) &&
-            afterRemove.marker === "stay",
+            afterRole.marker === "stay",
         {
             memberPage,
             memberMenu,
-            removeArmed,
-            removePosts,
-            afterRemove,
+            rolePosts,
+            afterRole,
             ex: drain(),
         },
     );
 
+    // Remove asks in its own sheet, then posts over Turbo.
     await goto("/settings/household/members/u2");
-    await clickSel(".fd-settings-detail [data-fd-menu-trigger]");
-    await sleep(200);
-    await clickSel(
-        '.fd-settings-detail button[commandfor="fd-member-make-owner"]',
+    await control("reset=posts");
+    await clickSel('.fd-settings button[commandfor="fd-member-remove"]');
+    await sleep(500);
+    const removeSheet = await ev<{
+        open: boolean;
+        width: number;
+        bottomGap: number;
+        viewport: number;
+        title: string;
+    }>(`(() => {
+        const d = document.getElementById("fd-member-remove");
+        const r = d.getBoundingClientRect();
+        return {
+            open: d.open,
+            width: Math.round(r.width),
+            bottomGap: Math.round(window.innerHeight - r.bottom),
+            viewport: window.innerWidth,
+            title: d.querySelector(".fd-sheet__title")?.textContent ?? "",
+        };
+    })()`);
+    await clickSel('#fd-member-remove button[type="submit"]');
+    await sleep(500);
+    const removePosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/household/members/u2/remove",
     );
+    record(
+        "Settings › Household: Remove Sam opens a bottom sheet that asks, and its Remove posts confirm=yes over Turbo",
+        removeSheet.open &&
+            removeSheet.width === removeSheet.viewport &&
+            removeSheet.bottomGap === 0 &&
+            removeSheet.title === "Remove Sam?" &&
+            removePosts.length === 1 &&
+            removePosts[0]!.entries.some(
+                ([k, v]) => k === "confirm" && v === "yes",
+            ),
+        { removeSheet, removePosts, ex: drain() },
+    );
+
+    await goto("/settings/household/members/u2");
+    await clickSel(".fd-settings .fd-menu--row [data-fd-menu-trigger]");
+    await sleep(200);
+    await clickSel('.fd-settings button[commandfor="fd-member-make-owner"]');
     await sleep(500);
     const makeOwner = await ev<{
         open: boolean;
@@ -5520,10 +5569,10 @@ try {
             text: d.querySelector(".fd-sheet__text")?.textContent ?? "",
         };
     })()`);
-    // Choosing the item closed the ⋯ menu behind the sheet; one Escape closes
-    // the sheet, and focus goes back to the ⋯.
+    // Choosing the item closed the menu behind the sheet; one Escape closes
+    // the sheet, and focus goes back to the Role row.
     const menuBehind = await ev<{ panelHidden: boolean }>(`({
-        panelHidden: document.querySelector(".fd-settings-detail .fd-menu__panel").hidden,
+        panelHidden: document.querySelector(".fd-settings .fd-menu--row .fd-menu__panel").hidden,
     })`);
     await send("Input.dispatchKeyEvent", {
         type: "keyDown",
@@ -5545,7 +5594,7 @@ try {
         focusOnTrigger: boolean;
     }>(`({
         open: document.getElementById("fd-member-make-owner").open,
-        focusOnTrigger: document.activeElement === document.querySelector(".fd-settings-detail [data-fd-menu-trigger]"),
+        focusOnTrigger: document.activeElement === document.querySelector(".fd-settings .fd-menu--row [data-fd-menu-trigger]"),
     })`);
     record(
         "Settings › Household: Make owner opens a bottom sheet, not a centred dialog",
@@ -5556,7 +5605,7 @@ try {
         { makeOwner, ex: drain() },
     );
     record(
-        "Settings › Household: choosing a menu item that opens a sheet closes the menu, one Escape closes the sheet and focus returns to the ⋯",
+        "Settings › Household: choosing Owner closes the Role menu, one Escape closes the sheet and focus returns to the Role row",
         menuBehind.panelHidden &&
             !afterEscape.open &&
             afterEscape.focusOnTrigger,
@@ -6440,8 +6489,8 @@ try {
         { tokenShown, tokenDone, tokenBack, ex: drain() },
     );
 
-    // From 1024 px the Detail bar is gone and the same ⋯ menu ends the page
-    // header, in line with the title: it opens on top of the page, in view.
+    // From 1024 px the Detail bar is gone, the page header has no ⋯, and the
+    // Role drop-down opens on top of the page, in view.
     await send("Emulation.setDeviceMetricsOverride", {
         width: 1440,
         height: 900,
@@ -6449,28 +6498,31 @@ try {
         mobile: false,
     });
     await goto("/settings/household/members/u2");
-    await clickSel(".fd-settings-page-head__actions [data-fd-menu-trigger]");
+    await clickSel(".fd-settings .fd-menu--row [data-fd-menu-trigger]");
     await sleep(250);
     const desktopMenu = await ev<{
         barShown: boolean;
+        headMenus: number;
         items: string[];
         inView: boolean;
         onTop: boolean;
     }>(`(() => {
-        const panel = document.querySelector(".fd-settings-page-head__actions .fd-menu__panel");
+        const panel = document.querySelector(".fd-settings .fd-menu--row .fd-menu__panel");
         const r = panel.getBoundingClientRect();
         const hit = document.elementFromPoint(r.left + r.width / 2, r.top + 12);
         return {
             barShown: getComputedStyle(document.querySelector(".fd-settings-detail")).display !== "none",
-            items: [...panel.querySelectorAll(".fd-menu__label")].slice(0, 3).map((e) => e.textContent),
+            headMenus: document.querySelectorAll(".fd-settings-page-head__actions [data-fd-menu-trigger]").length,
+            items: [...panel.querySelectorAll(".fd-menu__label")].map((e) => e.textContent),
             inView: !panel.hidden && r.width > 0 && r.left >= 0 && r.right <= window.innerWidth && r.bottom <= window.innerHeight,
             onTop: !!hit && panel.contains(hit),
         };
     })()`);
     record(
-        "Settings › Household: on desktop the ⋯ menu ends the page header (no Detail bar) and opens in view, over the page",
+        "Settings › Household: on desktop the member page has no Detail bar and no ⋯, and the Role drop-down opens in view, over the page",
         !desktopMenu.barShown &&
-            desktopMenu.items.join() === "Make admin,Make owner,Remove Sam" &&
+            desktopMenu.headMenus === 0 &&
+            desktopMenu.items.join() === "Member,Admin,Owner" &&
             desktopMenu.inView &&
             desktopMenu.onTop,
         { desktopMenu, ex: drain() },
@@ -6497,6 +6549,7 @@ try {
         })()`);
     };
     const headMenu = ".fd-settings-page-head__actions [data-fd-menu-trigger]";
+    const roleMenu = ".fd-settings .fd-menu--row [data-fd-menu-trigger]";
     const sideAdd = await sidePanel(
         "/settings/household",
         ['.fd-settings button[commandfor="fd-household-add-member"]'],
@@ -6512,10 +6565,7 @@ try {
     );
     const sideOwner = await sidePanel(
         "/settings/household/members/u2",
-        [
-            headMenu,
-            '.fd-settings-page-head__actions button[commandfor="fd-member-make-owner"]',
-        ],
+        [roleMenu, '.fd-settings button[commandfor="fd-member-make-owner"]'],
         "fd-member-make-owner",
     );
     const sideRotate = await sidePanel(

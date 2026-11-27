@@ -17732,7 +17732,7 @@ describe("authenticated dashboard HTTP", () => {
             alice,
         );
         expect(r.status).toBe(400);
-        expect(await r.text()).toContain("Confirm removing Bob from the menu.");
+        expect(await r.text()).toContain("Confirm removing Bob in the sheet.");
         expect(db.wipedUsers).toEqual([]);
     });
 

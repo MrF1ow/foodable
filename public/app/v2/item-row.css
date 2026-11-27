@@ -696,9 +696,16 @@ button.fd-item-row__check-btn {
     min-width: 0;
     min-height: 0;
     margin: 0;
-    padding: var(--space-2xs) 0;
+    /* Roomier, but nothing on the right: the unit follows the value at the
+       entry's own 4px gap (FigCraft 414420: one space). */
+    padding: var(--space-xs) 0 var(--space-xs) var(--space-sm);
     border: 0;
     border-bottom: 1px solid transparent;
+    /* A small corner, set here to beat the legacy `:where(.native input)` 12px
+       pill look of /app.css, which has no specificity of its own. Only the top
+       corners round: the field's one line is its bottom border, which stays
+       straight under the value instead of curling up into the unit. */
+    border-radius: var(--radius-xs) var(--radius-xs) 0 0;
     background: transparent;
     color: var(--text-secondary);
     font: inherit;
@@ -733,6 +740,10 @@ button.fd-item-row__check-btn {
     min-width: 0;
 }
 .fd-autosave-input--bare .fd-autosave-input__field {
+    box-sizing: border-box;
+    /* A bare field (the Goals card's name and note) is text on the card's own
+       column, so it takes no side padding. */
+    padding-inline: 0;
     flex: 1;
     width: 100%;
     min-width: 0;

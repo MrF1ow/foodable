@@ -448,6 +448,7 @@ export function renderSettingsSavedV2Body(view: SettingsSavedV2View): string {
                     : view.error,
             ),
             duplicates,
+            raw(`<hr class="fd-settings-divider">`),
             raw(search),
             list("Foods", foods, "No foods match"),
             list("Recipes", recipes, "No recipes match"),

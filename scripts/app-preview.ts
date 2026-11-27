@@ -124,7 +124,10 @@ import {
     HOUSEHOLD_ROTATE_TOKEN_SHEET_ID,
     renderHouseholdTokenPage,
 } from "../src/web/pages/v2/settings-household-token.js";
-import { MEMBER_MAKE_OWNER_SHEET_ID } from "../src/web/pages/v2/settings-member.js";
+import {
+    MEMBER_MAKE_OWNER_SHEET_ID,
+    MEMBER_REMOVE_SHEET_ID,
+} from "../src/web/pages/v2/settings-member.js";
 import { renderShareCreatedPage } from "../src/web/pages/v2/share-sheet.js";
 import { renderSettingsMemberV2Page } from "../src/web/pages/v2/settings-member.js";
 import { renderSettingsGoalsV2Page } from "../src/web/pages/v2/settings-goals.js";
@@ -2945,6 +2948,9 @@ for (const day of ["1", "3", "5"]) document.querySelector('#fd-recipe-plan-sheet
         "settings-household-v2-member": settingsMemberV2(),
         "settings-household-v2-member-owner": settingsMemberV2(
             MEMBER_MAKE_OWNER_SHEET_ID,
+        ),
+        "settings-household-v2-member-remove": settingsMemberV2(
+            MEMBER_REMOVE_SHEET_ID,
         ),
         "settings-household-v2-member-menu":
             withEveryMenuOpen(settingsMemberV2()),

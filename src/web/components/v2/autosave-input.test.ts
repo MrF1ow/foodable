@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { autosaveInput } from "./autosave-input.js";
 import { injectedAttributes, XSS, XSS_ESCAPED } from "./test-helpers.js";
 
@@ -78,4 +79,53 @@ test("every string is escaped", async () => {
     expect(html).toContain(XSS_ESCAPED);
     expect(html).not.toContain("<script>alert(1)");
     expect(await injectedAttributes(html)).toEqual([]);
+});
+
+test("the field has a small corner and roomier padding, not the pill of the legacy input rule", () => {
+    const css = readFileSync("./public/app/v2/item-row.css", "utf8");
+    const rule = css.match(/\n\.fd-autosave-input__field \{([^}]*)\}/)?.[1];
+    expect(rule).toBeDefined();
+    // Only the top corners round, so the bottom-border line stays straight
+    // under the value instead of curling up into the unit.
+    expect(rule).toContain(
+        "border-radius: var(--radius-xs) var(--radius-xs) 0 0",
+    );
+    expect(rule).toContain(
+        "padding: var(--space-xs) 0 var(--space-xs) var(--space-sm)",
+    );
+    expect(rule).not.toContain("999px");
+    // A bare field fills its row, so the padding must sit inside its width.
+    expect(css).toMatch(
+        /\.fd-autosave-input--bare \.fd-autosave-input__field \{\s*box-sizing: border-box;/,
+    );
+    // A bare field (the Goals card's name and note) sits on the card's text
+    // column: no side padding.
+    const bare = css.match(
+        /\.fd-autosave-input--bare \.fd-autosave-input__field \{([^}]*)\}/,
+    )?.[1];
+    expect(bare).toContain("padding-inline: 0;");
+    // The v2 partial beats /app.css, which stays as it was.
+    expect(readFileSync("./public/app/app.css", "utf8")).toContain(
+        "border-radius: 12px;",
+    );
+});
+
+test("the unit sits one gap from the value, and the field's line stops before it", () => {
+    const css = readFileSync("./public/app/v2/item-row.css", "utf8");
+    const entry = css.match(/\n\.fd-autosave-input__entry \{([^}]*)\}/)?.[1];
+    const unit = css.match(/\n\.fd-autosave-input__unit \{([^}]*)\}/)?.[1];
+    expect(entry).toContain("gap: var(--space-xs)");
+    // The field has no right padding and the unit no margin of its own, so
+    // the gap is the entry's 4px and the field's line never runs under it.
+    expect(unit).not.toContain("margin-inline-start");
+});
+
+test("the Saved foods divider has one gap below it and takes the row above's own hairline, so no line doubles", () => {
+    const css = readFileSync("./public/app/v2/settings.css", "utf8");
+    const rule = css.match(/\n\.fd-settings-divider \{([^}]*)\}/)?.[1];
+    expect(rule).toContain("margin: 0 0 var(--space-md)");
+    expect(rule).toContain("border-top: 1px solid var(--line)");
+    expect(css).toMatch(
+        /\.fd-list-group:has\(\+ \.fd-settings-divider\) > \.fd-item-row:last-child \{\s*border-bottom-color: transparent;/,
+    );
 });
