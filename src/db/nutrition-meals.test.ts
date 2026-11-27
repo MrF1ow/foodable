@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as nutrition from "./nutrition.js";
+import { buildMealsCsv } from "../domain/export.js";
 import {
     countMealItems,
     countMeals,
@@ -681,5 +682,36 @@ describeDb(pgAvailable !== null, "nutrition meals db", (getCtx) => {
             });
             expect(cleared.servings).toBeNull();
         });
+    });
+});
+
+describe("meals.csv and servings", () => {
+    test("a meal's servings is not exported: its totals are, so a re-import reads 1 serving", () => {
+        const csv = buildMealsCsv(
+            [
+                {
+                    id: "m1",
+                    user_id: "u1",
+                    logged_at: "2026-03-01T12:00:00.000Z",
+                    meal_type: "lunch",
+                    description: "Soup",
+                    calories: 600,
+                    protein_g: 20,
+                    carbs_g: null,
+                    fat_g: null,
+                    fiber_g: null,
+                    sugar_g: null,
+                    alcohol_g: null,
+                    caffeine_mg: null,
+                    servings: 2,
+                    notes: null,
+                    idempotency_key: null,
+                },
+            ],
+            "UTC",
+        );
+        const [header, row] = csv.split("\n");
+        expect(header).not.toContain("servings");
+        expect(row).toContain("600");
     });
 });

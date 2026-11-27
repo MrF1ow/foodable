@@ -90,9 +90,12 @@ export async function mealInputForRelog(
 ): Promise<MealInput> {
     const items = (meal.items ?? []) as RelogStoredItem[];
     if (items.length === 0) {
-        return mealInputFromRelogOutput(
-            householdId,
-            relogMeal(meal, [], new Map(), loggedAt),
+        return withSourceServings(
+            mealInputFromRelogOutput(
+                householdId,
+                relogMeal(meal, [], new Map(), loggedAt),
+            ),
+            [meal],
         );
     }
     const { foods, recipes } = await foodsAndRecipesForRelog(
@@ -103,6 +106,22 @@ export async function mealInputForRelog(
         householdId,
         relogMeal(meal, items, foods, loggedAt, recipes),
     );
+}
+
+/**
+ * A copy of a quick or free-text meal keeps the multiplier its totals were
+ * saved at, so the copy's edit sheet opens where the source's did. An
+ * item-backed copy takes its totals from its items and keeps none.
+ */
+function withSourceServings(
+    input: MealInput,
+    sources: readonly Meal[],
+): MealInput {
+    const only = sources.length === 1 ? sources[0]! : null;
+    if (!only || (only.items ?? []).length > 0 || only.servings == null) {
+        return input;
+    }
+    return { ...input, servings: only.servings };
 }
 
 export async function mealInputForSlotRelog(
@@ -120,5 +139,8 @@ export async function mealInputForSlotRelog(
             : { foods: new Map(), recipes: new Map() };
     const output = relogSlotMeals(meals, slot, foods, loggedAt, recipes);
     if (!output) return null;
-    return mealInputFromRelogOutput(householdId, output);
+    return withSourceServings(
+        mealInputFromRelogOutput(householdId, output),
+        meals,
+    );
 }

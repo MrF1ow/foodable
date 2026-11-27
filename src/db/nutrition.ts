@@ -186,8 +186,9 @@ export interface MealInput {
     idempotency_key?: string;
     items?: MealItemWrite[];
     item_digest?: string;
-    // Only updateMeal reads it (the web edit sheet); see Meal.servings. Left
-    // out, a write that sets the totals directly clears the stored servings.
+    // The web edit sheet (updateMeal) and Again on a quick or free-text meal
+    // (insertMeal, items-free only) write it; see Meal.servings. Left out, a
+    // write that sets the totals directly clears the stored servings.
     servings?: number | null;
 }
 
@@ -361,6 +362,13 @@ export async function insertMeal(
             sugar_g: meal.sugar_g ?? null,
             alcohol_g: meal.alcohol_g ?? null,
             caffeine_mg: meal.caffeine_mg ?? null,
+            // A copy of a quick or free-text meal keeps its multiplier so its
+            // sheet reopens where the source did; an item-backed meal's totals
+            // come from its items, so it never stores one.
+            servings:
+                meal.servings != null && !(input.items?.length ?? 0)
+                    ? Math.round(meal.servings * 100) / 100
+                    : null,
             logged_at: loggedAt,
             notes:
                 meal.notes != null ? decodeEscapeSequences(meal.notes) : null,

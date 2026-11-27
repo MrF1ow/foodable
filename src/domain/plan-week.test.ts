@@ -535,6 +535,16 @@ describe("pickMissingLines", () => {
         expect(pickMissingLines(two, ["eggs"])).toHaveLength(1);
     });
 
+    test("an id matches whatever its case", () => {
+        const id = "0b9a4c1e-2f3d-4a5b-8c6d-7e8f9a0b1c2d";
+        expect(pickMissingLines([line(id)], [id.toUpperCase()])).toHaveLength(
+            1,
+        );
+        expect(pickMissingLines([line(id.toUpperCase())], [id])).toHaveLength(
+            1,
+        );
+    });
+
     test("an empty choice picks nothing, and a line with no food is never picked", () => {
         expect(pickMissingLines(lines, [])).toEqual([]);
         expect(pickMissingLines(lines, ["a", "b", "c"])).toHaveLength(3);

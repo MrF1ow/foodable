@@ -704,7 +704,7 @@ export type AddMissingToGroceriesResult = {
 /**
  * The lines of `missingForPlan` a caller chose. `foodIds` null means no choice
  * was made: every line. A list keeps only the lines of those foods, in the
- * lines' own order; an id that is not among the lines is ignored, so a stale
+ * lines' own order; an id (any case) that is not among the lines is ignored, so a stale
  * or invented id never adds anything, and an empty list picks nothing.
  */
 export function pickMissingLines(
@@ -712,9 +712,9 @@ export function pickMissingLines(
     foodIds: readonly string[] | null,
 ): PlanMissingLine[] {
     if (foodIds === null) return [...lines];
-    const wanted = new Set(foodIds);
+    const wanted = new Set(foodIds.map((id) => id.toLowerCase()));
     return lines.filter(
-        (line) => line.foodId != null && wanted.has(line.foodId),
+        (line) => line.foodId != null && wanted.has(line.foodId.toLowerCase()),
     );
 }
 
