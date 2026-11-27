@@ -162,6 +162,12 @@ import {
     type CookSheetView,
 } from "./pages/v2/recipes-page-cook.js";
 import {
+    INGREDIENT_ADD_SHEET_ID,
+    ingredientSheetId,
+    type RecipeIngredientEditState,
+    type RecipeLineProblem,
+} from "./pages/v2/recipes-page-ingredients.js";
+import {
     GROCERY_SHARE_SHEET_ID,
     RECIPE_SHARE_SHEET_ID,
 } from "./pages/v2/share-sheet.js";
@@ -2340,6 +2346,12 @@ export async function renderRecipeDetailRoute(
         didYouMean?: import("./components/did-you-mean.js").DidYouMeanModal;
         /** The address carries `imported=1`: the importer's first landing on a draft. */
         imported?: boolean;
+        /** An ingredient sheet to open on load, with its refusal and what was typed (a refused edit, add or resolve). */
+        edit?: RecipeIngredientEditState;
+        /** The address names an ingredient (`?ingredient=`): its edit sheet opens on load. */
+        openIngredient?: string;
+        /** The address asks for Add ingredient (`?add=1`): its sheet opens on load. */
+        openAdd?: boolean;
     } = {},
 ): Promise<{ status: 200 | 403 | 404; html: string }> {
     const gate = await memberGate(viewerUserId);
@@ -2424,10 +2436,31 @@ export async function renderRecipeDetailRoute(
         return {
             ...row,
             displayName,
+            foodName: effective?.name ?? row.displayName,
             defaultUnit: effective?.defaultUnit ?? "g",
             ...(versionNote ? { versionNote } : {}),
         };
     });
+    // The lines may be edited when they are the base's own: a version with
+    // changes has lines of its own, which the sheets would not reach.
+    const editable = can(gate.viewer, "recipe.edit").ok && view.variant == null;
+    // The member view the address names, kept through the ingredient sheets: the
+    // base, or another member (the viewer's own version needs no `member`).
+    const memberView =
+        viewing === "base"
+            ? "base"
+            : viewing !== viewerUserId
+              ? viewing
+              : undefined;
+    const edit: RecipeIngredientEditState | undefined =
+        opts.edit ??
+        (editable && opts.openIngredient != null
+            ? ingredientRows.some((row) => row.id === opts.openIngredient)
+                ? { open: ingredientSheetId(opts.openIngredient) }
+                : undefined
+            : editable && opts.openAdd
+              ? { open: INGREDIENT_ADD_SHEET_ID }
+              : undefined);
     const noticeResult = await loadViewerNotices(gate.viewer);
     const chrome = await viewerChromeWithAttention(
         profile,
@@ -2531,11 +2564,13 @@ export async function renderRecipeDetailRoute(
                           "household.align_recipe_versions",
                       ).ok,
                   }),
-            gapReasons: [
-                ...new Set(
-                    notices.map((notice) => gapFromNotice(notice).message),
-                ),
-            ],
+            gaps: notices.map(gapFromNotice),
+            editable,
+            edit,
+            member: memberView,
+            usualFoodIds: usualProductRows({ foods: allFoods }).rows.map(
+                (row) => row.food.id,
+            ),
             favourite: (
                 await liveRecipesStore().listFavourites(
                     householdId,
@@ -2576,9 +2611,26 @@ export async function renderRecipeDetailRoute(
                 opts.openModalId === PLAN_SHEET_ID ? opts.error : undefined,
                 opts.openModalId === PLAN_SHEET_ID,
             ),
-            error: opts.error,
+            error:
+                opts.error ?? (editable ? undefined : refusalWithNoSheet(opts)),
         }),
     };
+}
+
+/**
+ * What a refused ingredient write says when the page has no sheet to hold it
+ * (the viewer's own version is showing, so its lines are not editable here):
+ * the refusal itself, or what the similar-foods question asks, so a refusal
+ * is never silent.
+ */
+function refusalWithNoSheet(opts: {
+    edit?: RecipeIngredientEditState;
+}): string | undefined {
+    if (!opts.edit) return undefined;
+    if (opts.edit.error) return opts.edit.error;
+    return opts.edit.didYouMean
+        ? "That name looks like a food you already have. Open the base recipe to pick which one."
+        : "That change was not made.";
 }
 
 const UUID_ID =
@@ -2709,11 +2761,11 @@ async function viewerDrafts(
     );
 }
 
-/** What the check finds on a draft's base recipe now, one sentence each. */
+/** What the check finds on a draft's base recipe now: a sentence each, and the ingredient or import line it is about. */
 async function draftProblems(
     householdId: string,
     recipeId: string,
-): Promise<string[]> {
+): Promise<RecipeLineProblem[]> {
     const store = liveRecipesStore();
     const [recipe, ingredients, importRow] = await Promise.all([
         store.getRecipe(householdId, recipeId),
@@ -2721,9 +2773,11 @@ async function draftProblems(
         store.getImport(householdId, recipeId),
     ]);
     if (!recipe) return [];
-    return verifyRecipe(recipe, ingredients, importRow).problems.map(
-        (p) => p.message,
-    );
+    return verifyRecipe(recipe, ingredients, importRow).problems.map((p) => ({
+        message: p.message,
+        ingredientId: p.ingredientId,
+        line: p.line,
+    }));
 }
 
 /** What the two Possible duplicates pages read: the current pairs and each food's use count. */

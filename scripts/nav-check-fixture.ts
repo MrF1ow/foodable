@@ -1417,7 +1417,25 @@ function fixtureRecipePage(
                   ),
         ingredientGroups,
         macrosPerPortion: macros,
-        gapReasons: draft && !opts.saved ? ["Counts 1 of 11 ingredients"] : [],
+        // The draft's Wide rice noodles have no nutrition: a warning icon on
+        // that row. The versions' lines carry changes of their own, so only a
+        // draft, a saved draft and the base's own lines are editable.
+        gaps:
+            draft && !opts.saved
+                ? [
+                      {
+                          ingredientId: "i1",
+                          displayName: "Wide rice noodles",
+                          foodId: "f-noodles",
+                          reason: "no_nutrition" as const,
+                          missingNutrients: [],
+                          usualProduct: null,
+                          message:
+                              "Wide rice noodles: no nutrition — add it, or pick a usual product",
+                      },
+                  ]
+                : [],
+        editable: draft || opts.version === "base",
         favourite: false,
         error: opts.error,
         ...(opts.share === false ? {} : { share: { open: false } }),
@@ -1451,7 +1469,15 @@ function fixtureRecipePage(
     };
     if (draft && !opts.saved) {
         view.draft = {
-            problems: ["Add the steps."],
+            problems: [
+                { message: "Add the steps.", ingredientId: null, line: null },
+                {
+                    message:
+                        '"a splash of fish sauce" couldn\'t be read as an ingredient.',
+                    ingredientId: null,
+                    line: "a splash of fish sauce",
+                },
+            ],
             expiresOn: "2026-12-01",
             canSave: true,
             canDiscard: true,

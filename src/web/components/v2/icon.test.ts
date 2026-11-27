@@ -48,9 +48,22 @@ const FIGCRAFT_ICONS = [
     "users",
 ].sort();
 
-test("IconName is exactly the 40 FigCraft Icon/* components", () => {
+test("IconName is the 40 FigCraft Icon/* components and the app's own warning glyph", () => {
     expect(FIGCRAFT_ICONS.length).toBe(40);
-    expect([...ICON_NAMES].sort() as string[]).toEqual(FIGCRAFT_ICONS);
+    expect([...ICON_NAMES].sort() as string[]).toEqual(
+        [...FIGCRAFT_ICONS, "warning"].sort(),
+    );
+});
+
+test("warning is a triangle with a bar and a filled dot, drawn like the other glyphs", () => {
+    const svg = icon("warning");
+    expect(svg).toStartWith(`<svg class="fd-icon fd-icon--warning"`);
+    expect(svg).toContain(`stroke-width="1.8"`);
+    expect(svg).toContain(`d="M12 4L21 19L3 19L12 4ZM12 10L12 14"`);
+    expect(svg).toContain(
+        `<path fill="currentColor" stroke="none" d="M11.1 16.5`,
+    );
+    expect(svg.match(/<path /g)?.length).toBe(2);
 });
 
 test("every icon draws on the 24 box, inherits currentColor and is decorative", () => {

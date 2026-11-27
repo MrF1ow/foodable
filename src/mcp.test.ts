@@ -4850,7 +4850,10 @@ describe("household config tools", () => {
         // +423: the optional `food_ids` input on add_plan_missing_to_groceries
         // (add only the ticked foods of Missing for the plan), with a
         // sentence of its description.
-        const TOOLS_LIST_MAX_CHARS = 237415;
+        // +124: the optional `food_id` input on update_recipe_ingredient (swap
+        // which food a line is, as the app's ingredient sheet does), with a
+        // clause of its description.
+        const TOOLS_LIST_MAX_CHARS = 237539;
         const TOOLS_LIST_MAX_COUNT = 107;
 
         test("all-flags-on tools/list stays within the size budget", async () => {
@@ -12851,6 +12854,161 @@ describe("get_recipe carries the cook preview over HTTP", () => {
     );
 });
 
+describe("update_recipe_ingredient changes which food a line is, over HTTP", () => {
+    type Call = (
+        name: string,
+        args?: Record<string, unknown>,
+    ) => Promise<ToolResult>;
+
+    // A saved recipe of two lines: Onion 100 g (diced) then Rice 50 g, and a
+    // second food to swap in.
+    async function setup(call: Call) {
+        const food = async (name: string) =>
+            (await call("upsert_food", { name })).structuredContent
+                ?.id as string;
+        const onion = await food("Onion");
+        const shallot = await food("Shallot");
+        const rice = await food("Rice");
+        const recipe = await call("create_recipe", {
+            name: "Soup",
+            yield_portions: 2,
+            instructions: "1. Simmer",
+        });
+        const recipeId = recipe.structuredContent?.id as string;
+        await call("add_recipe_ingredient", {
+            recipe_id: recipeId,
+            food_id: onion,
+            amount: 100,
+            unit: "g",
+        });
+        await call("add_recipe_ingredient", {
+            recipe_id: recipeId,
+            food_id: rice,
+            amount: 50,
+            unit: "g",
+        });
+        const lines = async () =>
+            GET_RECIPE_OUTPUT_SCHEMA.parse(
+                (await call("get_recipe", { id: recipeId })).structuredContent,
+            ).ingredients;
+        await call("update_recipe_ingredient", {
+            recipe_id: recipeId,
+            ingredient_id: (await lines())[0]!.id,
+            note: "diced",
+        });
+        return { onion, shallot, recipeId, lines };
+    }
+
+    test.each(ERAS)(
+        "food_id moves the line to that food and keeps its place and note; amount and unit stay unless sent (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call: Call = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                const { shallot, recipeId, lines } = await setup(call);
+                const [first] = await lines();
+                const kept = await call("update_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    ingredient_id: first!.id,
+                    food_id: shallot,
+                });
+                expect(kept.isError).toBeFalsy();
+                expect(textOf(kept)).toContain("Updated Shallot 100 g");
+                expect((await lines()).slice(0, 2)).toMatchObject([
+                    {
+                        id: first!.id,
+                        food_id: shallot,
+                        display_name: "Shallot",
+                        amount: 100,
+                        unit: "g",
+                        note: "diced",
+                    },
+                    { display_name: "Rice" },
+                ]);
+                // A new amount and unit go in with the swap.
+                const leek = (await call("upsert_food", { name: "Leek" }))
+                    .structuredContent?.id as string;
+                await call("update_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    ingredient_id: first!.id,
+                    food_id: leek,
+                    amount: 2,
+                    unit: "oz",
+                    note: null,
+                });
+                expect((await lines())[0]).toMatchObject({
+                    display_name: "Leek",
+                    amount: 2,
+                    unit: "oz",
+                    note: null,
+                });
+                // Without food_id it is the same update it always was.
+                await call("update_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    ingredient_id: first!.id,
+                    amount: 3,
+                });
+                expect((await lines())[0]).toMatchObject({
+                    display_name: "Leek",
+                    amount: 3,
+                    unit: "oz",
+                });
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "a swap that would break the saved recipe is refused and the line stays; an unknown food is refused too (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call: Call = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                const { shallot, recipeId, lines } = await setup(call);
+                const before = await lines();
+                // No amount and a note that does not say "to taste": the check fails.
+                const refused = await call("update_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    ingredient_id: before[0]!.id,
+                    food_id: shallot,
+                    amount: null,
+                });
+                expect(refused.isError).toBe(true);
+                expect(textOf(refused)).toContain(
+                    "That change would break this saved recipe",
+                );
+                expect(await lines()).toEqual(before);
+                const unknown = await call("update_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    ingredient_id: before[0]!.id,
+                    food_id: "no-such-food",
+                });
+                expect(unknown.isError).toBe(true);
+                expect(await lines()).toEqual(before);
+                // To taste with the words that say so goes through.
+                const taste = await call("update_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    ingredient_id: before[0]!.id,
+                    food_id: shallot,
+                    amount: null,
+                    note: "diced, to taste",
+                });
+                expect(taste.isError).toBeFalsy();
+                expect((await lines())[0]).toMatchObject({
+                    display_name: "Shallot",
+                    amount: null,
+                    note: "diced, to taste",
+                });
+            });
+        },
+    );
+});
+
 describe("a person's own version of a recipe over HTTP", () => {
     const REFUSAL =
         "An agent can only add, change or delete the entries of the person it acts for. Nothing was changed. Ask U2 to do it, or their agent.";
@@ -18327,8 +18485,11 @@ describe("authenticated dashboard HTTP", () => {
         const html = await detail.text();
         expect(html).toContain("Pasta");
         expect(html).toContain("400 g");
-        // No figures for it yet: dashes, and why, in the warning tone.
-        expect(html).toContain("fd-recipe-caption--warn");
+        // No figures for it yet: dashes, and the why is a warning icon on the
+        // ingredient (no list of reasons under the tiles).
+        expect(html).not.toContain("fd-recipe-caption--warn");
+        expect(html).toContain("fd-icon--warning");
+        expect(html).toContain("no nutrition");
 
         const refuse = await siteApp.request(
             `http://x/recipes/${recipeId}/delete`,
@@ -18399,7 +18560,8 @@ describe("authenticated dashboard HTTP", () => {
             "/recipes",
             `/recipes/${recipeId}`,
             `/recipes/${recipeId}/instructions`,
-            `/recipes/${recipeId}/ingredients`,
+            // `/recipes/:id/ingredients` is the Add ingredient sheet's route
+            // now; an id that is no ingredient's is still not found.
             `/recipes/${recipeId}/ingredients/ing-1`,
             `/recipes/${recipeId}/ingredients/ing-1/delete`,
             `/recipes/${recipeId}/ingredients/ing-1/move`,

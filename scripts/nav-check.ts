@@ -2078,7 +2078,7 @@ try {
             shareOff.emptyMenus === 0 &&
             shareOff.fits &&
             draft.bar.join() === "Save" &&
-            draft.status === "1 thing to fix" &&
+            draft.status === "2 things to fix" &&
             draft.left.join() === "Add the steps." &&
             draft.cook === 0 &&
             draft.plan === 0 &&
@@ -2128,6 +2128,272 @@ try {
         "v2 recipe page at 390 and 1440: Plan and Cook in the bar, the Detail bar's ⋯ (Share, the star) opening the share sheet whose Make link posts the expiry and answers a Link ready sheet (Copy, Done back to the recipe), Cook's sheet listing what it takes with the short ingredient greyed and posting servings, who it is logged for and the slot, Plan's sheet, Share gone and no ⋯ empty with mcp-share-links off, and a draft's bar: Save refused in place with what is left, then saved over Turbo; every sheet button measured and the page never wider than the screen",
         recipePageOk,
         { ...recipePageRes, ex: drain() },
+    );
+    // ---- Recipe ingredient editing on a draft: a row opens its sheet and
+    // Save posts the ingredient's route; the warning icon opens what is wrong
+    // with a link to the food; Add ingredient and Resolve have sheets of their
+    // own, and Drop posts its line; no list of warnings is left ----
+    const ingEditRes: Record<string, unknown> = {};
+    let ingEditOk = true;
+    const ingPosts = async (path: string) =>
+        (await stats()).posts.filter((p) => p.path === path);
+    const ingField = (
+        p: { entries: [string, string][] } | undefined,
+        k: string,
+    ) => p?.entries.filter(([key]) => key === k).map(([, v]) => v) ?? [];
+    for (const width of [390, 1440]) {
+        await send("Emulation.setDeviceMetricsOverride", {
+            width,
+            height: width < 600 ? 844 : 960,
+            deviceScaleFactor: 1,
+            mobile: false,
+        });
+        await control("reset=posts");
+        await goto("/recipes/r-draft");
+        await setMarker();
+        await sleep(800);
+        const list = await ev<{
+            rows: number;
+            opens: string[];
+            chevrons: number;
+            menus: number;
+            warnIcons: number;
+            warnOn: string | null;
+            warnList: number;
+            addLabel: string | null;
+            lines: string[];
+            lineButtons: string[];
+            lineWraps: boolean;
+            chevronEnds: number[];
+            warnBeforeChevron: boolean;
+            warnLinkFocus: boolean;
+            fits: boolean;
+        }>(`(() => {
+            const rows = [...document.querySelectorAll("#fd-recipe-ingredients-heading + .fd-list-group > .fd-item-row")];
+            return {
+                rows: rows.length,
+                opens: rows.map((r) => r.querySelector("a[data-fd-open-item]")?.getAttribute("data-fd-open-item") ?? ""),
+                chevrons: rows.filter((r) => r.querySelector(".fd-item-row__chevron")).length,
+                menus: rows.filter((r) => r.querySelector("[data-fd-menu-trigger]")).length,
+                warnIcons: document.querySelectorAll(".fd-recipe-warn .fd-icon--warning").length,
+                warnOn: document.querySelector(".fd-recipe-warn button")?.closest(".fd-item-row")?.querySelector(".fd-item-row__title")?.textContent ?? null,
+                warnList: document.querySelectorAll(".fd-recipe-caption--warn").length,
+                addLabel: document.querySelector("#fd-recipe-ingredients-heading .fd-section-header__action")?.textContent ?? null,
+                lines: [...document.querySelectorAll(".fd-recipe-line .fd-item-row__title")].map((e) => e.textContent),
+                lineButtons: [...document.querySelectorAll(".fd-recipe-line [data-fd-btn]")].map((b) => b.textContent.trim()),
+                lineWraps: [...document.querySelectorAll(".fd-recipe-line .fd-item-row__title")].every((e) => getComputedStyle(e).whiteSpace === "normal"),
+                chevronEnds: rows.map((r) => Math.round(r.querySelector(".fd-item-row__chevron").getBoundingClientRect().right)),
+                warnBeforeChevron: (() => {
+                    const r = rows.find((row) => row.querySelector(".fd-recipe-warn"));
+                    const w = r?.querySelector(".fd-recipe-warn")?.getBoundingClientRect();
+                    const c = r?.querySelector(".fd-item-row__chevron")?.getBoundingClientRect();
+                    return !!w && !!c && w.right <= c.left + 1;
+                })(),
+                warnLinkFocus: (() => {
+                    const a = rows.find((row) => row.querySelector(".fd-recipe-warn"))?.querySelector("a.fd-item-row__anchor");
+                    if (!(a instanceof HTMLElement)) return false;
+                    a.focus();
+                    const ok = document.activeElement === a;
+                    a.blur();
+                    return ok;
+                })(),
+                fits: document.documentElement.scrollWidth <= ${width} + 1,
+            };
+        })()`);
+        // The warning icon is its own control: it opens its detail and leaves the page where it is.
+        await clickSel(".fd-recipe-warn button");
+        await sleep(300);
+        const warn = await ev<{
+            open: boolean;
+            title: string | null;
+            text: string;
+            food: string | null;
+            fixes: string[];
+            at: string;
+        }>(`(() => {
+            const d = document.querySelector("dialog[open]");
+            return {
+                open: d?.id === "fd-recipe-warn-i1",
+                title: d?.querySelector(".fd-sheet__title")?.textContent ?? null,
+                text: d?.querySelector(".fd-sheet-body")?.textContent ?? "",
+                food: d?.querySelector('a[href^="/settings/saved"]')?.getAttribute("href") ?? null,
+                fixes: [...(d?.querySelectorAll(".fd-item-row__title") ?? [])].map((e) => e.textContent.trim()),
+                at: location.pathname + location.search,
+            };
+        })()`);
+        // Edit ingredient, from the detail, opens the ingredient's own sheet.
+        await ev(
+            `document.querySelector('#fd-recipe-warn-i1 [commandfor="fd-recipe-ing-i1"]').click()`,
+        );
+        await sleep(300);
+        const opened = await ev<{
+            open: boolean;
+            title: string | null;
+            amount: string | null;
+            unit: string | null;
+            food: string | null;
+            menu: string[];
+            fits: boolean;
+        }>(`(() => {
+            const d = document.querySelector("#fd-recipe-ing-i1");
+            return {
+                open: !!d?.open,
+                title: d?.querySelector(".fd-sheet__title")?.textContent ?? null,
+                amount: d?.querySelector('input[name="amount"]')?.value ?? null,
+                unit: d?.querySelector('input[name="unit"]')?.value ?? null,
+                food: d?.querySelector('input[name="food_name"]')?.value ?? null,
+                menu: [...(d?.querySelectorAll(".fd-sheet__menu .fd-menu__label") ?? [])].map((e) => e.textContent),
+                fits: document.documentElement.scrollWidth <= ${width} + 1,
+            };
+        })()`);
+        // A fresh look: the row itself opens the sheet in place, and Save posts.
+        await goto("/recipes/r-draft");
+        await setMarker();
+        await sleep(600);
+        await clickSel(
+            '#fd-recipe-ingredients-heading + .fd-list-group a[data-fd-open-item="fd-recipe-ing-i2"]',
+        );
+        await sleep(300);
+        const rowOpen = await ev<{
+            open: string | null;
+            at: string;
+            marker: string | null;
+        }>(`({
+            open: document.querySelector("dialog[open]")?.id ?? null,
+            at: location.pathname + location.search,
+            marker: window.__marker ?? null,
+        })`);
+        await ev(
+            `(() => { const f = document.querySelector('#fd-recipe-ing-i2 input[name="amount"]'); f.value = "3"; })()`,
+        );
+        const saveButtons = await sheetButtons();
+        await ev(
+            `document.querySelector('#fd-recipe-ing-i2 .fd-sheet__actions [type="submit"]').click()`,
+        );
+        await sleep(500);
+        const editPosts = await ingPosts("/recipes/r-draft/ingredients/i2");
+        // Add ingredient.
+        await goto("/recipes/r-draft");
+        await setMarker();
+        await sleep(600);
+        await clickSel(
+            "#fd-recipe-ingredients-heading .fd-section-header__action",
+        );
+        await sleep(300);
+        const addOpen = await ev<{ open: string | null; fields: string[] }>(`({
+            open: document.querySelector("dialog[open]")?.id ?? null,
+            fields: [...document.querySelectorAll("#fd-recipe-add-ingredient [name]")].map((e) => e.getAttribute("name")),
+        })`);
+        await ev(
+            `(() => { document.querySelector('#fd-recipe-add-ingredient input[name="food_name"]').value = "Fish sauce"; })()`,
+        );
+        await ev(
+            `document.querySelector('#fd-recipe-add-ingredient .fd-sheet__actions [type="submit"]').click()`,
+        );
+        await sleep(500);
+        const addPosts = await ingPosts("/recipes/r-draft/ingredients");
+        // Resolve an unreadable line, then Drop it.
+        await goto("/recipes/r-draft");
+        await setMarker();
+        await sleep(600);
+        await clickSel('.fd-recipe-line [commandfor="fd-recipe-line-0"]');
+        await sleep(300);
+        const resolveOpen = await ev<{
+            open: string | null;
+            subtitle: string | null;
+        }>(`({
+            open: document.querySelector("dialog[open]")?.id ?? null,
+            subtitle: document.querySelector("#fd-recipe-line-0 .fd-sheet__subtitle")?.textContent ?? null,
+        })`);
+        await ev(
+            `(() => { document.querySelector('#fd-recipe-line-0 input[name="food_name"]').value = "Fish sauce"; })()`,
+        );
+        await ev(
+            `document.querySelector('#fd-recipe-line-0 .fd-sheet__actions [type="submit"]').click()`,
+        );
+        await sleep(500);
+        const resolvePosts = await ingPosts(
+            "/recipes/r-draft/unresolved/resolve",
+        );
+        await goto("/recipes/r-draft");
+        await setMarker();
+        await sleep(600);
+        await clickSel(
+            '.fd-recipe-line form[action$="/unresolved/drop"] button',
+        );
+        await sleep(500);
+        const dropPosts = await ingPosts("/recipes/r-draft/unresolved/drop");
+        const ok =
+            list.rows === 2 &&
+            list.opens.join() === "fd-recipe-ing-i1,fd-recipe-ing-i2" &&
+            list.chevrons === 2 &&
+            list.menus === 0 &&
+            list.warnIcons === 1 &&
+            list.warnOn === "Wide rice noodles" &&
+            list.warnList === 0 &&
+            list.addLabel === "Add ingredient" &&
+            list.lines.join() === "a splash of fish sauce" &&
+            list.lineButtons.join() === "Resolve,Drop" &&
+            list.lineWraps &&
+            // The warning icon sits before the chevron, so every row's chevron ends the row at the same place.
+            list.warnBeforeChevron &&
+            list.warnLinkFocus &&
+            new Set(list.chevronEnds).size === 1 &&
+            list.fits &&
+            warn.open &&
+            warn.title === "Wide rice noodles" &&
+            warn.text.includes("no nutrition") &&
+            warn.food === "/settings/saved?food=f-noodles" &&
+            warn.fixes.join() === "Edit ingredient,Edit Wide rice noodles" &&
+            warn.at === "/recipes/r-draft" &&
+            opened.open &&
+            opened.title === "Wide rice noodles" &&
+            opened.amount === "7" &&
+            opened.unit === "oz" &&
+            opened.food === "Wide rice noodles" &&
+            opened.menu.join() ===
+                "Open food,Remove ingredient,Cancel,Remove" &&
+            opened.fits &&
+            rowOpen.open === "fd-recipe-ing-i2" &&
+            rowOpen.at === "/recipes/r-draft" &&
+            rowOpen.marker === "stay" &&
+            saveButtons.ok &&
+            saveButtons.n === 1 &&
+            editPosts.length === 1 &&
+            ingField(editPosts[0], "amount").join() === "3" &&
+            ingField(editPosts[0], "unit").join() === "tbsp" &&
+            ingField(editPosts[0], "food_name").join() === "Dark soy sauce" &&
+            addOpen.open === "fd-recipe-add-ingredient" &&
+            addOpen.fields.includes("food_name") &&
+            addPosts.length === 1 &&
+            ingField(addPosts[0], "food_name").join() === "Fish sauce" &&
+            resolveOpen.open === "fd-recipe-line-0" &&
+            resolveOpen.subtitle === "a splash of fish sauce" &&
+            resolvePosts.length === 1 &&
+            ingField(resolvePosts[0], "line").join() ===
+                "a splash of fish sauce" &&
+            ingField(resolvePosts[0], "food_name").join() === "Fish sauce" &&
+            dropPosts.length === 1 &&
+            ingField(dropPosts[0], "line").join() === "a splash of fish sauce";
+        ingEditRes[String(width)] = {
+            list,
+            warn,
+            opened,
+            rowOpen,
+            saveButtons,
+            editPosts,
+            addOpen,
+            addPosts,
+            resolveOpen,
+            resolvePosts,
+            dropPosts,
+        };
+        ingEditOk = ingEditOk && ok;
+    }
+    record(
+        "v2 recipe ingredient editing at 390 and 1440: a draft's rows open their own sheet and Save posts the ingredient's route, the warning icon is its own control that opens what is wrong with a link to the food and to the ingredient's sheet, Add ingredient and Resolve have sheets of their own, Drop posts its line, and no list of warnings is left",
+        ingEditOk,
+        { ...ingEditRes, ex: drain() },
     );
     // ---- Plan sheet: Starts opens a month picker, Meal and Repeat are
     // pull-downs, Pick days shows the weekday chips; the form posts the same

@@ -7,17 +7,34 @@ import {
     renderRecipesListPage,
 } from "../loaders.js";
 
-import { formAmount, formOptionalNumber, formText } from "../form.js";
+import {
+    compactFormFields,
+    formAmount,
+    formOptionalNumber,
+    formText,
+    isSimilarFoodsError,
+    manualOnSimilar,
+    rememberAliasIfRequested,
+} from "../form.js";
 import { requireMember, requireSiteUser, siteMember } from "../middleware.js";
 import {
+    addRecipeIngredientById,
+    addRecipeManualIngredient,
     assertCanDeleteRecipe,
     deleteRecipe,
+    editRecipeIngredient,
     isRecipeDraft,
     RecipeEditBreaksCheckError,
     RecipeForbiddenError,
+    removeRecipeIngredient,
+    resolveLineAsIngredient,
+    toTasteNote,
+    measuredNote,
+    resolveUnresolvedLines,
     saveRecipeDraft,
     RecipeInputError,
     RecipeUnverifiedError,
+    type RecipeLineFood,
 } from "../../domain/recipes.js";
 import {
     getHouseholdConfig,
@@ -59,6 +76,7 @@ import {
 } from "../pages/v2/recipes-page-cook.js";
 import { MealItemsError } from "../../domain/meals.js";
 import { cookClaimId, cookRecipe } from "../../domain/stock.js";
+import { buildDidYouMeanModal } from "../components/did-you-mean.js";
 import { cookSheetToastFlash } from "../components/toast-flash.js";
 import { redirectWithToast } from "../components/toast.js";
 import { safeReturnPath } from "../usual-products-path.js";
@@ -93,6 +111,12 @@ import {
 import { parseFilterParam } from "../../domain/recipe-filters.js";
 import { answerSharedRecipeImport } from "./recipes-shared-import.js";
 import { recipesListV2Href } from "../pages/v2/recipes-list.js";
+import {
+    INGREDIENT_ADD_SHEET_ID,
+    ingredientSheetId,
+    recipeViewHref,
+    resolveSheetId,
+} from "../pages/v2/recipes-page-ingredients.js";
 import {
     parsePlanBack,
     PLAN_SHEET_ID,
@@ -470,6 +494,8 @@ recipesRoutes.get("/recipes/:id", requireSiteUser, async (c) => {
             member: c.req.query("member"),
             openCook: c.req.query("cook") === "1",
             imported: c.req.query("imported") === "1",
+            openIngredient: c.req.query("ingredient"),
+            openAdd: c.req.query("add") === "1",
             plan: {
                 open: c.req.query("plan") === "1",
                 date: c.req.query("date"),
@@ -827,8 +853,11 @@ recipesRoutes.post(
             const page = await recipeFormError(userId, recipeId, err);
             return c.html(page.html, page.status);
         }
+        // Back on the view it was posted from (the base, or the viewer's own
+        // version).
+        const body = await c.req.parseBody();
         // toast: none (the row reads "On the list")
-        return c.redirect(`/recipes/${recipeId}`, 303);
+        return c.redirect(recipeViewHref(recipeId, sheetMember(body)), 303);
     },
 );
 
@@ -907,6 +936,386 @@ recipesRoutes.post(
         return c.redirect(`/recipes/${recipeId}`, 303);
     },
 );
+
+/**
+ * A sheet's amount: blank or 0 is "to taste" (no amount), a figure above zero
+ * is the amount, anything else is refused.
+ */
+function sheetAmount(body: Record<string, string | File>): number | null {
+    const raw = formText(body, "amount").trim();
+    if (raw === "") return null;
+    const amount = Number(raw);
+    if (!Number.isFinite(amount) || amount < 0) {
+        throw new RecipeInputError("Enter an amount of 0 or more.");
+    }
+    return amount === 0 ? null : amount;
+}
+
+/** The food a sheet names: the one picked from the similar foods, else the typed name. */
+function sheetFood(
+    body: Record<string, string | File>,
+): RecipeLineFood | undefined {
+    const foodId = formText(body, "food_id").trim();
+    if (foodId) return { foodId };
+    const name = formText(body, "food_name").trim();
+    return name ? { name, onSimilar: manualOnSimilar(body) } : undefined;
+}
+
+/** What a sheet posted, kept to show again and to post again after a similar-foods question. */
+function sheetFields(
+    body: Record<string, string | File>,
+): Record<string, string> {
+    return compactFormFields({
+        amount: formText(body, "amount").trim() || undefined,
+        unit: formText(body, "unit") || undefined,
+        note: formText(body, "note") || undefined,
+        food_name: formText(body, "food_name").trim() || undefined,
+        line: formText(body, "line") || undefined,
+        member: sheetMember(body),
+    });
+}
+
+/**
+ * The member view a sheet was opened from (`base`, or a member's id), posted
+ * back with it: the redirect and a refused write's page return to that view,
+ * not to the viewer's own version. Anything else is no view.
+ */
+function sheetMember(body: Record<string, string | File>): string | undefined {
+    const member = formText(body, "member").trim();
+    return /^[A-Za-z0-9_-]{1,64}$/.test(member) ? member : undefined;
+}
+
+/**
+ * A refused ingredient write answers in place: the recipe page again, on the
+ * view it was posted from, with the sheet that was posted open on load, holding
+ * the refusal (or the similar-foods question) and what was typed.
+ */
+async function ingredientSheetAnswer(
+    c: Context,
+    userId: string,
+    recipeId: string,
+    sheetId: string,
+    action: string,
+    err: unknown,
+    body: Record<string, string | File>,
+) {
+    const typed = sheetFields(body);
+    const member = sheetMember(body);
+    if (isSimilarFoodsError(err)) {
+        const didYouMean = buildDidYouMeanModal(err, typed, sheetId, action);
+        if (didYouMean) {
+            const page = await renderRecipeDetailRoute(userId, recipeId, {
+                edit: { open: sheetId, typed, didYouMean },
+                member,
+            });
+            return c.html(page.html, page.status === 200 ? 409 : page.status);
+        }
+    }
+    if (
+        !(err instanceof RecipeInputError) &&
+        !(err instanceof RecipeForbiddenError)
+    ) {
+        throw err;
+    }
+    if (
+        err.message === "Unknown recipe." ||
+        err.message === "Unknown ingredient."
+    ) {
+        return c.text("Not found", 404);
+    }
+    const page = await renderRecipeDetailRoute(userId, recipeId, {
+        edit: { open: sheetId, error: err.message, typed },
+        member,
+    });
+    const status = err instanceof RecipeForbiddenError ? 403 : 400;
+    return c.html(page.html, page.status === 200 ? status : page.status);
+}
+
+function requireRecipeEdit(member: ReturnType<typeof siteMember>) {
+    const refusal = can(member, "recipe.edit");
+    if (!refusal.ok) throw new RecipeForbiddenError(refusal.reason);
+}
+
+/**
+ * An ingredient sheet's Save: amount, unit, note and, when the name differs,
+ * the food (`update_recipe_ingredient` and a swap). On a saved recipe an edit
+ * that would make it fail the check is refused with what it would break, and
+ * the sheet reopens with that.
+ */
+recipesRoutes.post(
+    "/recipes/:id/ingredients/:ingredientId",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const recipeId = c.req.param("id");
+        const ingredientId = c.req.param("ingredientId");
+        if (!UUID_SHAPE.test(recipeId) || !UUID_SHAPE.test(ingredientId)) {
+            return c.text("Not found", 404);
+        }
+        const body = await c.req.parseBody();
+        try {
+            requireRecipeEdit(member);
+            const amount = sheetAmount(body);
+            const note = formText(body, "note").trim();
+            const edited = await editRecipeIngredient(
+                liveRecipesStore(),
+                liveFoodsStore(),
+                {
+                    householdId: member.householdId,
+                    recipeId,
+                    ingredientId,
+                    amount,
+                    unit: formText(body, "unit"),
+                    // "0 is to taste" (the sheet says so): the person's note
+                    // stays and says it, so the check accepts the line; an
+                    // amount again takes the added "to taste" back off.
+                    note:
+                        amount === null
+                            ? toTasteNote(note)
+                            : measuredNote(note),
+                    food: sheetFood(body),
+                },
+            );
+            if (edited.foodId) {
+                await rememberAliasIfRequested(
+                    liveFoodsStore(),
+                    member.householdId,
+                    body,
+                    edited.foodId,
+                );
+            }
+        } catch (err) {
+            return ingredientSheetAnswer(
+                c,
+                userId,
+                recipeId,
+                ingredientSheetId(ingredientId),
+                `/recipes/${recipeId}/ingredients/${ingredientId}`,
+                err,
+                body,
+            );
+        }
+        // toast: none (the row shows the new words)
+        return c.redirect(recipeViewHref(recipeId, sheetMember(body)), 303);
+    },
+);
+
+/**
+ * Remove ingredient, from its sheet's ⋯ (`remove_recipe_ingredient`). A saved
+ * recipe that would fail the check without it keeps the line and says why; a
+ * line already gone is the same answer as a removal.
+ */
+recipesRoutes.post(
+    "/recipes/:id/ingredients/:ingredientId/remove",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const recipeId = c.req.param("id");
+        const ingredientId = c.req.param("ingredientId");
+        if (!UUID_SHAPE.test(recipeId) || !UUID_SHAPE.test(ingredientId)) {
+            return c.text("Not found", 404);
+        }
+        const body = await c.req.parseBody();
+        try {
+            requireRecipeEdit(member);
+            await removeRecipeIngredient(
+                liveRecipesStore(),
+                member.householdId,
+                recipeId,
+                ingredientId,
+            );
+        } catch (err) {
+            if (
+                err instanceof RecipeInputError &&
+                err.message === "Unknown ingredient."
+            ) {
+                // toast: none (it is already gone)
+                return c.redirect(
+                    recipeViewHref(recipeId, sheetMember(body)),
+                    303,
+                );
+            }
+            return ingredientSheetAnswer(
+                c,
+                userId,
+                recipeId,
+                ingredientSheetId(ingredientId),
+                `/recipes/${recipeId}/ingredients/${ingredientId}`,
+                err,
+                body,
+            );
+        }
+        // toast: none (the row is gone)
+        return c.redirect(recipeViewHref(recipeId, sheetMember(body)), 303);
+    },
+);
+
+/**
+ * Add ingredient: a catalog food by id (picked from the similar foods) or by
+ * the name typed, with an amount and unit (`add_recipe_ingredient`). A name
+ * that looks like a food already in the catalog asks which one first, and
+ * writes nothing.
+ */
+recipesRoutes.post("/recipes/:id/ingredients", requireMember, async (c) => {
+    const userId = c.get("userId");
+    const member = siteMember(c);
+    const recipeId = c.req.param("id");
+    if (!UUID_SHAPE.test(recipeId)) return c.text("Not found", 404);
+    const body = await c.req.parseBody();
+    try {
+        requireRecipeEdit(member);
+        const food = sheetFood(body);
+        if (!food) throw new RecipeInputError("Enter a food name.");
+        const input = {
+            householdId: member.householdId,
+            recipeId,
+            amount: sheetAmount(body),
+            unit: formText(body, "unit") || undefined,
+        };
+        const added =
+            "foodId" in food
+                ? await addRecipeIngredientById(
+                      liveRecipesStore(),
+                      liveFoodsStore(),
+                      { ...input, foodId: food.foodId },
+                  )
+                : await addRecipeManualIngredient(
+                      liveRecipesStore(),
+                      liveFoodsStore(),
+                      { ...input, name: food.name, onSimilar: food.onSimilar },
+                  );
+        if (added.foodId) {
+            await rememberAliasIfRequested(
+                liveFoodsStore(),
+                member.householdId,
+                body,
+                added.foodId,
+            );
+        }
+    } catch (err) {
+        return ingredientSheetAnswer(
+            c,
+            userId,
+            recipeId,
+            INGREDIENT_ADD_SHEET_ID,
+            `/recipes/${recipeId}/ingredients`,
+            err,
+            body,
+        );
+    }
+    // toast: none (the row is on the list)
+    return c.redirect(recipeViewHref(recipeId, sheetMember(body)), 303);
+});
+
+/**
+ * An unreadable import line becomes an ingredient: it is added as the food
+ * named, then the line is cleared and the check run again
+ * (`resolveLineAsIngredient`). A refusal keeps the line, and Drop stays.
+ */
+recipesRoutes.post(
+    "/recipes/:id/unresolved/resolve",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const recipeId = c.req.param("id");
+        if (!UUID_SHAPE.test(recipeId)) return c.text("Not found", 404);
+        const body = await c.req.parseBody();
+        const line = formText(body, "line").trim();
+        try {
+            requireRecipeEdit(member);
+            const food = sheetFood(body);
+            if (!food) throw new RecipeInputError("Enter a food name.");
+            const added = await resolveLineAsIngredient(
+                liveRecipesStore(),
+                liveFoodsStore(),
+                {
+                    householdId: member.householdId,
+                    recipeId,
+                    line,
+                    food,
+                    amount: sheetAmount(body),
+                    unit: formText(body, "unit") || undefined,
+                },
+            );
+            if (added.foodId) {
+                await rememberAliasIfRequested(
+                    liveFoodsStore(),
+                    member.householdId,
+                    body,
+                    added.foodId,
+                );
+            }
+        } catch (err) {
+            // The page numbers the lines the check names: the non-blank ones.
+            const lines = (
+                (
+                    await liveRecipesStore().getImport(
+                        member.householdId,
+                        recipeId,
+                    )
+                )?.unresolvedLines ?? []
+            )
+                .map((l) => l.trim())
+                .filter(Boolean);
+            const index = lines.indexOf(line);
+            if (
+                index < 0 &&
+                err instanceof RecipeInputError &&
+                err.message === "That line is already handled."
+            ) {
+                // toast: none (the page shows what is left)
+                return c.redirect(
+                    recipeViewHref(recipeId, sheetMember(body)),
+                    303,
+                );
+            }
+            return ingredientSheetAnswer(
+                c,
+                userId,
+                recipeId,
+                index >= 0 ? resolveSheetId(index) : INGREDIENT_ADD_SHEET_ID,
+                `/recipes/${recipeId}/unresolved/resolve`,
+                err,
+                body,
+            );
+        }
+        // toast: none (the ingredient is on the list)
+        return c.redirect(recipeViewHref(recipeId, sheetMember(body)), 303);
+    },
+);
+
+/** Drop an unreadable line: the check stops asking about it. */
+recipesRoutes.post("/recipes/:id/unresolved/drop", requireMember, async (c) => {
+    const userId = c.get("userId");
+    const member = siteMember(c);
+    const recipeId = c.req.param("id");
+    if (!UUID_SHAPE.test(recipeId)) return c.text("Not found", 404);
+    const body = await c.req.parseBody();
+    try {
+        requireRecipeEdit(member);
+        const recipe = await liveRecipesStore().getRecipe(
+            member.householdId,
+            recipeId,
+        );
+        if (!recipe) return c.text("Not found", 404);
+        await resolveUnresolvedLines(
+            liveRecipesStore(),
+            member.householdId,
+            recipeId,
+            [formText(body, "line")],
+        );
+    } catch (err) {
+        const page = await recipeFormError(userId, recipeId, err, {
+            version: sheetMember(body),
+        });
+        return c.html(page.html, page.status);
+    }
+    // toast: none (the line is gone)
+    return c.redirect(recipeViewHref(recipeId, sheetMember(body)), 303);
+});
 
 /**
  * Every value of a repeated form field as numbers; junk stays NaN for the

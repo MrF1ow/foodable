@@ -262,8 +262,14 @@ const viewBase = {
     ingredients: [],
     ingredientGroups: [],
     macrosPerPortion: MACROS,
-    gapReasons: [],
 };
+
+/** A problem the check found that is about no ingredient and no line. */
+const problem = (message: string) => ({
+    message,
+    ingredientId: null,
+    line: null,
+});
 
 /** The text of the first element a pattern finds; the test fails when none is. */
 function first(html: string, pattern: RegExp): string {
@@ -597,7 +603,7 @@ describe("renderRecipeDetailBody", () => {
         expect(tiles).toContain("Protein");
     });
 
-    test("incomplete macros show their reasons under dashed tiles", () => {
+    test("incomplete macros show dashed tiles and no list of reasons: each reason is a warning on its ingredient", () => {
         const macros: RecipeMacros = {
             calories: null,
             protein_g: null,
@@ -610,11 +616,27 @@ describe("renderRecipeDetailBody", () => {
         };
         const html = renderRecipeDetailBody({
             ...viewBase,
+            ingredients: [BUTTERMILK],
             macrosPerPortion: macros,
-            gapReasons: ["Buttermilk: set grams per millilitre"],
+            gaps: [
+                {
+                    ingredientId: "ing2",
+                    displayName: "Buttermilk",
+                    foodId: "food-buttermilk",
+                    reason: "missing_grams_per_ml",
+                    missingNutrients: [],
+                    usualProduct: null,
+                    message: "Buttermilk: set grams per millilitre",
+                },
+            ],
         });
-        expect(html).toContain("grams per millilitre");
-        expect(html).toContain("fd-recipe-caption--warn");
+        expect(html).not.toContain("fd-recipe-caption--warn");
+        const macrosSection = first(
+            html,
+            /<section class="fd-recipe-macros"[\s\S]*?<\/section>/,
+        );
+        expect(macrosSection).not.toContain("grams per millilitre");
+        expect(html).toContain("fd-icon--warning");
         expect(
             first(html, /<dl class="fd-tiles[\s\S]*?<\/dl>/).match(/—/g),
         ).toHaveLength(4);
@@ -623,7 +645,10 @@ describe("renderRecipeDetailBody", () => {
 
 describe("a draft's page", () => {
     const draft = {
-        problems: ["Add the steps.", "Resolve every ingredient line."],
+        problems: [
+            problem("Add the steps."),
+            problem("Resolve every ingredient line."),
+        ],
         expiresOn: "2026-12-01",
         canSave: true,
         canDiscard: true,
@@ -678,7 +703,7 @@ describe("a draft's page", () => {
         const one = renderRecipeDetailBody({
             ...viewBase,
             recipe: draftRecipe,
-            draft: { ...draft, problems: ["Add the steps."] },
+            draft: { ...draft, problems: [problem("Add the steps.")] },
         });
         expect(one).toContain("1 thing to fix");
         const ready = renderRecipeDetailBody({

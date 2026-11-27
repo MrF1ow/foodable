@@ -26,6 +26,7 @@ import {
     createMemoryRecipesStore,
     createRecipe,
     deleteRecipe,
+    editRecipeIngredient,
     getRecipeView,
     importRecipeFromText,
     listRecipes,
@@ -41,6 +42,7 @@ import {
     resolveTotalPortions,
     removeRecipeIngredient,
     reorderRecipeIngredients,
+    resolveLineAsIngredient,
     recipeCanMakeNow,
     recipeFilters,
     recipeHighProtein,
@@ -51,6 +53,8 @@ import {
     updateRecipeIngredient,
     recipeIngredientFromRow,
     recipeIngredientToRow,
+    toTasteNote,
+    measuredNote,
     type RecipeIngredient,
 } from "./recipes.js";
 import {
@@ -59,6 +63,7 @@ import {
     effectiveFoodsByIds,
     findOrCreateManualFood,
     newFood,
+    SimilarFoodsError,
     setUsualProduct,
     updateFood,
 } from "./foods.js";
@@ -2597,5 +2602,275 @@ describe("drafts", () => {
                 (p) => p.code,
             ),
         ).toEqual(["no_instructions"]);
+    });
+});
+
+describe("editing a recipe's lines from the app", () => {
+    async function draftWithLeek(unresolved: string[] = []) {
+        const recipes = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        const draft = (
+            await importRecipeFromText(
+                recipes,
+                foods,
+                {
+                    householdId: HH,
+                    creatorId: ALICE,
+                    text: "pasted",
+                    instructions: "1. Simmer",
+                    name: "Soup",
+                    ingredients: [{ name: "Leek", amount: 1, unit: "g" }],
+                },
+                { lookup: async () => null },
+            )
+        ).recipe;
+        const importRow = (await recipes.getImport(HH, draft.id))!;
+        await recipes.upsertImport({
+            ...importRow,
+            unresolvedLines: unresolved,
+        });
+        const [leek] = await recipes.listIngredients(HH, draft.id);
+        return { recipes, foods, draft, leek: leek! };
+    }
+
+    test("an amount, unit and note change on a draft, and an amount of none is to taste", async () => {
+        const { recipes, foods, draft, leek } = await draftWithLeek();
+        const edited = await editRecipeIngredient(recipes, foods, {
+            householdId: HH,
+            recipeId: draft.id,
+            ingredientId: leek.id,
+            amount: 3,
+            unit: "oz",
+            note: "sliced",
+        });
+        expect(edited.quantity).toEqual({ amount: 3, unit: "oz" });
+        expect(edited.note).toBe("sliced");
+        const taste = await editRecipeIngredient(recipes, foods, {
+            householdId: HH,
+            recipeId: draft.id,
+            ingredientId: leek.id,
+            amount: null,
+            unit: "oz",
+            note: null,
+        });
+        expect(taste.quantity).toBeNull();
+        expect(taste.note).toBe("to taste");
+    });
+
+    test("naming another food moves the line to it with the new amount; the line's own name changes only the amounts", async () => {
+        const { recipes, foods, draft, leek } = await draftWithLeek();
+        const same = await editRecipeIngredient(recipes, foods, {
+            householdId: HH,
+            recipeId: draft.id,
+            ingredientId: leek.id,
+            amount: 2,
+            unit: "g",
+            food: { name: "leek" },
+        });
+        expect(same.foodId).toBe(leek.foodId);
+        const onion = await findOrCreateManualFood(foods, HH, "food", "Onion");
+        const byId = await editRecipeIngredient(recipes, foods, {
+            householdId: HH,
+            recipeId: draft.id,
+            ingredientId: leek.id,
+            amount: 4,
+            unit: "g",
+            note: "diced",
+            food: { foodId: onion.id },
+        });
+        expect(byId).toMatchObject({
+            foodId: onion.id,
+            displayName: "Onion",
+            quantity: { amount: 4, unit: "g" },
+            note: "diced",
+        });
+        const byName = await editRecipeIngredient(recipes, foods, {
+            householdId: HH,
+            recipeId: draft.id,
+            ingredientId: leek.id,
+            amount: 1,
+            unit: "g",
+            note: null,
+            food: { name: "Shallot" },
+        });
+        expect(byName.displayName).toBe("Shallot");
+        expect(byName.foodId).not.toBe(onion.id);
+        expect(await recipes.listIngredients(HH, draft.id)).toHaveLength(1);
+    });
+
+    test("a new name that looks like a food in the catalog asks which one, and writes nothing", async () => {
+        const { recipes, foods, draft, leek } = await draftWithLeek();
+        await findOrCreateManualFood(foods, HH, "food", "Red onion");
+        const asked = await editRecipeIngredient(recipes, foods, {
+            householdId: HH,
+            recipeId: draft.id,
+            ingredientId: leek.id,
+            amount: 1,
+            unit: "g",
+            food: { name: "Onion", onSimilar: "ask" },
+        }).catch((e: unknown) => e);
+        expect(asked).toBeInstanceOf(SimilarFoodsError);
+        expect(await recipes.listIngredients(HH, draft.id)).toEqual([leek]);
+    });
+
+    test("a saved recipe refuses an edit that would break it and keeps the line as it was", async () => {
+        const { recipes, foods, draft, leek } = await draftWithLeek();
+        await saveRecipeDraft(recipes, HH, draft.id);
+        const err = await editRecipeIngredient(recipes, foods, {
+            householdId: HH,
+            recipeId: draft.id,
+            ingredientId: leek.id,
+            amount: null,
+            unit: "g",
+            note: "sliced",
+        }).catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(RecipeEditBreaksCheckError);
+        expect(await recipes.listIngredients(HH, draft.id)).toEqual([leek]);
+    });
+
+    test("toTasteNote keeps the person's words and adds to taste unless the note already says it is not measured", () => {
+        expect(toTasteNote(null)).toBe("to taste");
+        expect(toTasteNote("  ")).toBe("to taste");
+        expect(toTasteNote("finely chopped")).toBe("finely chopped, to taste");
+        expect(toTasteNote(" sliced ")).toBe("sliced, to taste");
+        expect(toTasteNote("to taste")).toBe("to taste");
+        expect(toTasteNote("a pinch, optional")).toBe("a pinch, optional");
+    });
+
+    test("measuredNote takes the added to taste back off once the line has an amount", () => {
+        expect(measuredNote("to taste")).toBeNull();
+        expect(measuredNote(" To taste ")).toBeNull();
+        expect(measuredNote("finely chopped, to taste")).toBe("finely chopped");
+        expect(measuredNote("sliced")).toBe("sliced");
+        expect(measuredNote("")).toBeNull();
+        expect(measuredNote(null)).toBeNull();
+        // Only a trailing "to taste" is the one the sheet added.
+        expect(measuredNote("to taste, then more")).toBe("to taste, then more");
+    });
+
+    test("a swap takes the note with it in one write, so a saved recipe checks the note it will have", async () => {
+        const { recipes, foods, draft, leek } = await draftWithLeek();
+        await saveRecipeDraft(recipes, HH, draft.id);
+        const onion = await findOrCreateManualFood(foods, HH, "food", "Onion");
+        // The old note alone ("none") would pass; the new one with no amount and
+        // no not-measured phrase must not slip through.
+        const refused = await editRecipeIngredient(recipes, foods, {
+            householdId: HH,
+            recipeId: draft.id,
+            ingredientId: leek.id,
+            amount: null,
+            note: "diced",
+            food: { foodId: onion.id },
+        }).catch((e: unknown) => e);
+        expect(refused).toBeInstanceOf(RecipeEditBreaksCheckError);
+        expect(await recipes.listIngredients(HH, draft.id)).toEqual([leek]);
+        const taste = await editRecipeIngredient(recipes, foods, {
+            householdId: HH,
+            recipeId: draft.id,
+            ingredientId: leek.id,
+            amount: null,
+            note: toTasteNote("diced"),
+            food: { foodId: onion.id },
+        });
+        expect(taste).toMatchObject({
+            id: leek.id,
+            foodId: onion.id,
+            quantity: null,
+            note: "diced, to taste",
+        });
+    });
+
+    test("a swap with no amount given keeps the line's amount and unit; one given replaces them", async () => {
+        const { recipes, foods, draft, leek } = await draftWithLeek();
+        const onion = await findOrCreateManualFood(foods, HH, "food", "Onion");
+        const kept = await editRecipeIngredient(recipes, foods, {
+            householdId: HH,
+            recipeId: draft.id,
+            ingredientId: leek.id,
+            food: { foodId: onion.id },
+        });
+        expect(kept).toMatchObject({
+            foodId: onion.id,
+            displayName: "Onion",
+            quantity: { amount: 1, unit: "g" },
+        });
+        const garlic = await findOrCreateManualFood(
+            foods,
+            HH,
+            "food",
+            "Garlic",
+        );
+        const replaced = await editRecipeIngredient(recipes, foods, {
+            householdId: HH,
+            recipeId: draft.id,
+            ingredientId: leek.id,
+            amount: 3,
+            unit: "oz",
+            food: { foodId: garlic.id },
+        });
+        expect(replaced).toMatchObject({
+            foodId: garlic.id,
+            quantity: { amount: 3, unit: "oz" },
+        });
+        // No food: the same patch as update_recipe_ingredient.
+        const patched = await editRecipeIngredient(recipes, foods, {
+            householdId: HH,
+            recipeId: draft.id,
+            ingredientId: leek.id,
+            note: "peeled",
+        });
+        expect(patched).toMatchObject({
+            quantity: { amount: 3, unit: "oz" },
+            note: "peeled",
+        });
+    });
+
+    test("an unreadable line becomes an ingredient: it is added, then cleared from the draft's lines", async () => {
+        const { recipes, foods, draft } = await draftWithLeek([
+            "a pinch of love",
+            "something else",
+        ]);
+        const onion = await findOrCreateManualFood(foods, HH, "food", "Onion");
+        const added = await resolveLineAsIngredient(recipes, foods, {
+            householdId: HH,
+            recipeId: draft.id,
+            line: "a pinch of love",
+            food: { foodId: onion.id },
+            amount: 2,
+            unit: "g",
+        });
+        expect(added).toMatchObject({
+            displayName: "Onion",
+            quantity: { amount: 2, unit: "g" },
+        });
+        expect(
+            (await recipes.getImport(HH, draft.id))?.unresolvedLines,
+        ).toEqual(["something else"]);
+        expect(await recipes.listIngredients(HH, draft.id)).toHaveLength(2);
+        const byName = await resolveLineAsIngredient(recipes, foods, {
+            householdId: HH,
+            recipeId: draft.id,
+            line: "something else",
+            food: { name: "Chives" },
+            amount: null,
+        });
+        expect(byName.displayName).toBe("Chives");
+        expect(byName.note).toBe("to taste");
+        expect(
+            (await recipes.getImport(HH, draft.id))?.unresolvedLines,
+        ).toEqual([]);
+    });
+
+    test("a line that is no longer unresolved is refused before anything is added", async () => {
+        const { recipes, foods, draft } = await draftWithLeek(["only line"]);
+        const err = await resolveLineAsIngredient(recipes, foods, {
+            householdId: HH,
+            recipeId: draft.id,
+            line: "another line",
+            food: { name: "Chives" },
+        }).catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(RecipeInputError);
+        expect((err as Error).message).toBe("That line is already handled.");
+        expect(await recipes.listIngredients(HH, draft.id)).toHaveLength(1);
     });
 });

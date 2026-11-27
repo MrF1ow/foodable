@@ -52,6 +52,7 @@ import {
 } from "../src/web/pages/v2/recipes-page.js";
 import type { CookSheetView } from "../src/web/pages/v2/recipes-page-cook.js";
 import { renderRecipeCompareV2Page } from "../src/web/pages/v2/recipes-page-compare.js";
+import { gapFromNotice } from "../src/domain/recipes.js";
 import type { VersionsCompare } from "../src/domain/recipe-variants.js";
 import {
     renderNotificationsPage,
@@ -996,6 +997,20 @@ function previewWeekPlan(openSheet?: "missing" | "plan") {
     };
 }
 
+/** Two import lines the parser could not read, as the draft's check names them. */
+const UNREADABLE_LINES = [
+    {
+        message: '"a splash of fish sauce" couldn\'t be read as an ingredient.',
+        ingredientId: null,
+        line: "a splash of fish sauce",
+    },
+    {
+        message: '"1 lime, in wedges" couldn\'t be read as an ingredient.',
+        ingredientId: null,
+        line: "1 lime, in wedges",
+    },
+];
+
 const RECIPE = {
     id: "r1",
     householdId: H,
@@ -1651,6 +1666,8 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 recipeId: "r1",
                 foodId: "f-eggs",
                 displayName: "Eggs · Kirkland Large Eggs",
+                // The food's own name: the title carries its usual product, the edit sheet's Food field does not.
+                foodName: "Eggs",
                 quantity: { amount: 3, unit: "each" },
                 note: null,
                 sortOrder: 0,
@@ -1863,7 +1880,11 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 ),
             ),
             macrosPerPortion: MACROS as never,
-            gapReasons: [],
+            // Buttermilk has no nutrition: a warning icon on its row.
+            gaps: recipeView.notices.map((notice) =>
+                gapFromNotice(notice as never),
+            ),
+            editable: true,
             favourite: true,
             cook,
             plan: {
@@ -1959,7 +1980,21 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                       incomplete: true,
                   } as never)
                 : ({ ...MACROS, incomplete: false } as never),
-            gapReasons: draft ? ["Counts 1 of 10 ingredients"] : [],
+            gaps: draft
+                ? [
+                      {
+                          ingredientId: "pse9",
+                          displayName: "Vegetable oil",
+                          foodId: "f-pse9",
+                          reason: "no_nutrition" as const,
+                          missingNutrients: [],
+                          usualProduct: null,
+                          message:
+                              "Vegetable oil: no nutrition — add it, or pick a usual product",
+                      },
+                  ]
+                : [],
+            editable: true,
             ...(draft ? { draft } : {}),
             ...(error ? { error } : {}),
             mentions: findMissingMentions({
@@ -2061,7 +2096,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 fat_g: 31,
                 incomplete: true,
             } as never,
-            gapReasons: ["Counts 5 of 6 ingredients"],
             favourite: false,
             cook: { ...cookSheet, recipeName: "Chicken alfredo" },
             plan: {
@@ -2659,7 +2693,10 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         "recipe-mentions": padSeeEw(),
         // The draft bar: Save and what is left, in place of Cook and Plan.
         "recipe-draft": padSeeEw({
-            problems: ["Resolve every ingredient line.", "Add the steps."],
+            problems: [
+                ...UNREADABLE_LINES,
+                { message: "Add the steps.", ingredientId: null, line: null },
+            ],
             expiresOn: "2026-12-01",
             canSave: true,
             canDiscard: true,
@@ -2668,7 +2705,14 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         // The leave guard, on the importer's first landing: a link out asks Discard this recipe?
         "recipe-draft-leave": driven(
             padSeeEw({
-                problems: ["Resolve every ingredient line.", "Add the steps."],
+                problems: [
+                    ...UNREADABLE_LINES,
+                    {
+                        message: "Add the steps.",
+                        ingredientId: null,
+                        line: null,
+                    },
+                ],
                 expiresOn: "2026-12-01",
                 canSave: true,
                 canDiscard: true,
@@ -2678,13 +2722,44 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         ),
         "recipe-draft-refused": padSeeEw(
             {
-                problems: ["Add the steps."],
+                problems: [
+                    {
+                        message: "Add the steps.",
+                        ingredientId: null,
+                        line: null,
+                    },
+                ],
                 expiresOn: "2026-12-01",
                 canSave: true,
                 canDiscard: true,
                 leaveGuard: false,
             },
             "Not saved yet. Fix what is listed below, then save it again.",
+        ),
+        // Tapping an ingredient opens its edit sheet; Add ingredient opens its own.
+        "recipe-ingredient": driven(
+            recipeV2(cookSheet),
+            `document.querySelector('[data-fd-open-item^="fd-recipe-ing-"]').click()`,
+        ),
+        "recipe-ingredient-add": driven(
+            recipeV2(cookSheet),
+            `document.querySelector('.fd-section-header__action[data-fd-open-item]').click()`,
+        ),
+        // The warning icon on Buttermilk opens what is wrong and where to fix it.
+        "recipe-ingredient-warning": driven(
+            recipeV2(cookSheet),
+            `document.querySelector(".fd-recipe-warn button").click()`,
+        ),
+        // An unreadable line: Resolve opens its sheet.
+        "recipe-draft-resolve": driven(
+            padSeeEw({
+                problems: [...UNREADABLE_LINES],
+                expiresOn: "2026-12-01",
+                canSave: true,
+                canDiscard: true,
+                leaveGuard: false,
+            }),
+            `document.querySelector('.fd-recipe-line [command="show-modal"]').click()`,
         ),
         // `mcp-share-links` off: no Share item in the Detail bar's ⋯.
         "recipe-no-share": recipeV2(cookSheet, false, false, false),

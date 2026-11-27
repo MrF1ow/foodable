@@ -5,6 +5,7 @@ import {
     recipeSteps,
     recipeTimeLabel,
     type Recipe,
+    type RecipeGap,
     type RecipeIngredient,
     type RecipeMacros,
 } from "../../../domain/recipes.js";
@@ -41,6 +42,18 @@ import {
     renderCookSheet,
     type CookSheetView,
 } from "./recipes-page-cook.js";
+import {
+    addIngredientHref,
+    editableIngredientRow,
+    ingredientWarnings,
+    INGREDIENT_ADD_SHEET_ID,
+    renderIngredientSheets,
+    unreadableLines,
+    warningButton,
+    type IngredientEditView,
+    type RecipeIngredientEditState,
+    type RecipeLineProblem,
+} from "./recipes-page-ingredients.js";
 import {
     PLAN_SHEET_ID,
     PLAN_SLOT_LABEL,
@@ -152,8 +165,27 @@ export type RecipeDetailV2View = {
     ingredients: IngredientRow[];
     ingredientGroups: RecipeIngredientPlaceGroup[];
     macrosPerPortion: RecipeMacros;
-    /** One sentence per reason the macros are incomplete (from the recipe's notices). */
-    gapReasons: string[];
+    /**
+     * What the macros lack, one per reason and ingredient (from the recipe's
+     * notices). Each draws a warning icon on its ingredient's row, which opens
+     * the sentence and a link to the food.
+     */
+    gaps?: readonly RecipeGap[];
+    /**
+     * The viewer may change the recipe's lines: they have `recipe.edit` and
+     * the lines shown are the base's own (not a version with changes). Rows
+     * then open an edit sheet, and Add ingredient shows.
+     */
+    editable?: boolean;
+    /** An ingredient sheet that is open on load, with its refusal and what was typed. */
+    edit?: RecipeIngredientEditState;
+    /**
+     * The member view the address names (`base`, or another member's id): the
+     * ingredient links and forms carry it, so an edit lands where it started.
+     */
+    member?: string;
+    /** The foods on the Usuals list, so a warning's food link opens the right sheet. */
+    usualFoodIds?: readonly string[];
     /** How many portions of the recipe are the viewer's own; absent shows no line. */
     portionCount?: number;
     /** The whose-version pull-down; see {@link RecipeVersionPicker}. */
@@ -188,7 +220,12 @@ export type RecipeDetailV2View = {
      * draft bar, with Save, in place of Plan and Cook.
      */
     draft?: {
-        problems: string[];
+        /**
+         * What the check still finds. One about an ingredient is that row's
+         * warning icon; one about an unreadable line is that line's row in the
+         * card (`lines`); the rest are listed in the card.
+         */
+        problems: RecipeLineProblem[];
         expiresOn: string | null;
         /** The viewer may save recipes (`recipe.edit`). */
         canSave: boolean;
@@ -209,6 +246,10 @@ type IngredientRow = Pick<
     RecipeIngredient,
     "id" | "foodId" | "displayName" | "quantity" | "note"
 > & {
+    /** The food's own name (the title can carry its usual product too). */
+    foodName?: string;
+    /** The food's own unit, for the edit sheet of a line with no amount. */
+    defaultUnit?: string;
     /**
      * How the shown version's line differs from the base, said as the row's
      * first subline words ("Yours · base 6 oz"); absent on a line the base
@@ -328,12 +369,11 @@ function macroValue(value: number | null | undefined, grams: boolean) {
 
 /**
  * "Per serving" and the four tiles; a figure the recipe cannot give is a dash,
- * never a zero. Each reason the totals are incomplete is a caption under them
- * in the warning tone.
+ * never a zero. What the totals lack is a warning icon on each ingredient's
+ * row, not a list here.
  */
 function macrosBlock(
     macros: RecipeMacros,
-    gapReasons: string[],
     portionCount: number | undefined,
     caption: string,
     portionsFor: string,
@@ -367,21 +407,12 @@ function macrosBlock(
         portionCount == null
             ? ""
             : `<p class="fd-recipe-caption fd-recipe-portions">${esc(portionCount === 1 ? `1 portion for ${portionsFor}` : `${portionCount} portions for ${portionsFor}`)}</p>`;
-    const gaps =
-        macros.incomplete || macros.calories == null
-            ? gapReasons
-                  .map(
-                      (reason) =>
-                          `<p class="fd-recipe-caption fd-recipe-caption--warn">${esc(reason)}</p>`,
-                  )
-                  .join("")
-            : "";
     return `<section class="fd-recipe-macros" aria-label="Per serving">${caption}${String(
         statTiles(tiles, {
             label: "Per serving",
             className: "fd-recipe-macro-tiles",
         }),
-    )}${portions}${gaps}</section>`;
+    )}${portions}</section>`;
 }
 
 type IngredientPlace = {
@@ -530,14 +561,15 @@ function ingredientMenu(
     draft: boolean,
     onList: boolean,
 ): Html {
-    const items: MenuItem[] = [
-        {
+    const items: MenuItem[] = [];
+    if (ingredient.foodId) {
+        items.push({
             kind: "link",
             label: "Open food",
             href: `${APP_PATHS.product}/${ingredient.foodId}?from=${encodeURIComponent(`/recipes/${recipeId}`)}`,
-        },
-    ];
-    if (!draft && !onList) {
+        });
+    }
+    if (ingredient.foodId && !draft && !onList) {
         items.push({
             kind: "post",
             label: "Add to grocery list",
@@ -551,41 +583,82 @@ function ingredientMenu(
     });
 }
 
+/** The words of the page's ingredient editing, as the sheets and rows read them. */
+function ingredientEditView(view: RecipeDetailV2View): IngredientEditView {
+    return {
+        recipeId: view.recipe.id,
+        member: view.member,
+        usualFoodIds: view.usualFoodIds,
+        editable: view.editable === true,
+        draft: Boolean(view.draft),
+        edit: view.edit,
+        gaps: view.gaps,
+        problems: view.draft?.problems,
+    };
+}
+
 function ingredientsSection(view: RecipeDetailV2View): string {
     const places = placesByIngredient(view.ingredientGroups);
     const listed = new Set(view.onList ?? []);
+    const editing = ingredientEditView(view);
+    const warnings = ingredientWarnings(editing);
+    const header = sectionHeader({
+        label: "Ingredients",
+        count: view.ingredients.length,
+        rule: false,
+        id: "fd-recipe-ingredients-heading",
+        ...(view.editable
+            ? {
+                  action: {
+                      label: "Add ingredient",
+                      href: addIngredientHref(view.recipe.id, view.member),
+                      // Opens its sheet at once (`kitchen.js`); the link works with no script.
+                      data: { "fd-open-item": INGREDIENT_ADD_SHEET_ID },
+                  },
+              }
+            : {}),
+    });
     if (view.ingredients.length === 0) {
-        return `<p class="fd-recipe-empty">No ingredients yet.</p>`;
+        return `<div class="fd-recipe-group">${String(header)}<p class="fd-recipe-empty">No ingredients yet.</p></div>`;
     }
     const rows = view.ingredients.map((ingredient) => {
         const place = places.get(ingredient.id);
         const onList =
             ingredient.foodId != null && listed.has(ingredient.foodId);
-        return itemRow({
-            title: ingredient.displayName,
+        const words = {
             meta:
                 place?.amountLabel ??
                 ingredientAmountLabel(ingredient.quantity, ingredient.note),
             subtitle: ingredientSubline(place, onList, ingredient.versionNote),
+        };
+        const problems = warnings.get(ingredient.id) ?? [];
+        if (view.editable) {
+            return editableIngredientRow(editing, ingredient, words, problems);
+        }
+        const menuHtml = ingredientMenu(
+            view.recipe.id,
+            ingredient,
+            Boolean(view.draft),
+            onList,
+        );
+        return itemRow({
+            title: ingredient.displayName,
+            meta: words.meta,
+            subtitle: words.subtitle,
             trailing: {
                 kind: "control",
-                html: ingredientMenu(
-                    view.recipe.id,
-                    ingredient,
-                    Boolean(view.draft),
-                    onList,
-                ),
+                html:
+                    problems.length > 0
+                        ? raw(
+                              `<span class="fd-recipe-row-actions">${warningButton(ingredient.id, ingredient.displayName)}${menuHtml}</span>`,
+                          )
+                        : menuHtml,
             },
         });
     });
-    return `<div class="fd-recipe-group">${String(
-        sectionHeader({
-            label: "Ingredients",
-            count: view.ingredients.length,
-            rule: false,
-            id: "fd-recipe-ingredients-heading",
-        }),
-    )}${String(listGroup({ rows, label: "Ingredients" }))}</div>`;
+    return `<div class="fd-recipe-group">${String(header)}${String(
+        listGroup({ rows, label: "Ingredients" }),
+    )}</div>`;
 }
 
 function instructionsHtml(
@@ -648,15 +721,32 @@ function servingsMeta(portions: number): string {
 
 /**
  * What is left on a draft: that it is not saved, when it goes, and what the
- * check still finds. The draft bar's Save answers it.
+ * check still finds. A problem about an ingredient is that row's warning icon
+ * and one about an unreadable line is that line's row here, with Resolve and
+ * Drop; the rest (the name, the steps) are listed. The draft bar's Save
+ * answers it.
  */
-function draftCard(draft: NonNullable<RecipeDetailV2View["draft"]>): string {
+function draftCard(
+    draft: NonNullable<RecipeDetailV2View["draft"]>,
+    editing: IngredientEditView,
+): string {
     const day = draftDayLabel(draft.expiresOn);
     const expires = day ? ` It is deleted on ${day} unless you save it.` : "";
+    const lines = draft.problems.flatMap((p) => (p.line ? [p.line] : []));
+    const rest = draft.problems.filter((p) => !p.line && !p.ingredientId);
+    const marked = draft.problems.some((p) => p.ingredientId);
     const left =
-        draft.problems.length > 0
-            ? `<p class="fd-recipe-caption">Fix these before you save it:</p><ul class="fd-recipe-draft__problems">${draft.problems.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>`
-            : `<p class="fd-recipe-caption">It passes the check and is ready to save.</p>`;
+        draft.problems.length === 0
+            ? `<p class="fd-recipe-caption">It passes the check and is ready to save.</p>`
+            : `${
+                  rest.length > 0
+                      ? `<p class="fd-recipe-caption">Fix these before you save it:</p><ul class="fd-recipe-draft__problems">${rest.map((p) => `<li>${esc(p.message)}</li>`).join("")}</ul>`
+                      : ""
+              }${unreadableLines(editing, lines)}${
+                  marked
+                      ? `<p class="fd-recipe-caption">An ingredient marked with a warning needs a look before you save it.</p>`
+                      : ""
+              }`;
     return `<section class="fd-recipe-draft" id="fd-recipe-draft" aria-label="Draft">
 <p class="fd-recipe-draft__lead">Not saved yet.${esc(expires)}</p>
 ${left}
@@ -764,7 +854,9 @@ export function renderRecipeDetailBody(view: RecipeDetailV2View): string {
     const planned = plannedLine(view.planned);
     const pageError =
         view.error &&
-        // A draft has no sheets to hold the error.
+        // An open sheet holds its own error; with no sheet to hold it (the
+        // lines are not the viewer's to edit here) the page says it.
+        !(view.edit && view.editable) &&
         (view.draft ||
             (!view.cook?.open && !view.plan?.open && !view.share?.open))
             ? `<p class="fd-recipe-error" role="alert">${esc(view.error)}</p>`
@@ -775,7 +867,7 @@ export function renderRecipeDetailBody(view: RecipeDetailV2View): string {
         raw(`<div class="fd-recipe-head">${String(title)}${planned}</div>`),
     ]);
     const left = raw(
-        `${pageError}${view.draft ? draftCard(view.draft) : ""}${renderMentionCards(recipe.id, view.mentions)}${macrosBlock(view.macrosPerPortion, view.gapReasons, view.portionCount, perServingCaption(view), portionsFor(view))}${ingredientsSection(view)}`,
+        `${pageError}${view.draft ? draftCard(view.draft, ingredientEditView(view)) : ""}${renderMentionCards(recipe.id, view.mentions)}${macrosBlock(view.macrosPerPortion, view.portionCount, perServingCaption(view), portionsFor(view))}${ingredientsSection(view)}`,
     );
     const right = raw(instructionsHtml(recipe.instructions, view.mentions));
     const layout = pageLayout({
@@ -790,6 +882,7 @@ ${String(layout)}
 ${view.cook && !view.draft ? renderCookSheet(view.cook) : ""}
 ${view.plan && !view.draft ? renderPlanSheet(view.plan) : ""}
 ${view.draft?.leaveGuard && view.draft.canDiscard ? leaveSheet(recipe.id, view.draft.expiresOn) : ""}
+${renderIngredientSheets(ingredientEditView(view), view.ingredients, new Set(view.onList ?? []), view.draft?.problems.flatMap((p) => (p.line ? [p.line] : [])) ?? [])}
 ${
     view.share && !view.draft
         ? renderShareSheet({

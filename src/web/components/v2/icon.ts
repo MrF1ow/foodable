@@ -120,9 +120,16 @@ const GLYPHS = {
     users: {
         stroke: "M8 13C9.66 13 11 11.66 11 10C11 8.34 9.66 7 8 7C6.34 7 5 8.34 5 10M16 12C17.66 12 19 10.66 19 9C19 7.34 17.66 6 16 6C14.34 6 13 7.34 13 9M4 19L4 17.8C4 15.59 5.79 13.8 8 13.8M12 19L12 17.8C12 15.59 13.79 13.8 16 13.8M20 19L20 17.8C19.99 15.93 18.68 14.32 16.85 13.92",
     },
+    // Not a FigCraft `Icon/` component: the design has no warning glyph. A
+    // triangle on the same 24 box, with the mark drawn as a stroked bar and a
+    // filled dot, as the help glyph draws its dot.
+    warning: {
+        stroke: "M12 4L21 19L3 19L12 4ZM12 10L12 14",
+        fill: "M11.1 16.5C11.1 17 11.5 17.4 12 17.4C12.5 17.4 12.9 17 12.9 16.5C12.9 16 12.5 15.6 12 15.6C11.5 15.6 11.1 16 11.1 16.5Z",
+    },
 } as const satisfies Record<string, Glyph>;
 
-/** The 40 FigCraft `Icon/<name>` names. */
+/** The 40 FigCraft `Icon/<name>` names, and `warning`, which only the app draws. */
 export type IconName = keyof typeof GLYPHS;
 
 export const ICON_NAMES = Object.keys(GLYPHS) as readonly IconName[];

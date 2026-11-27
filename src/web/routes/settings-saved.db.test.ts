@@ -126,6 +126,35 @@ describeDb(pgAvailable !== null, "settings saved foods & recipes", (getCtx) => {
         });
     }
 
+    test("?food= opens that food's edit sheet on load, filled with it; an unknown or another household's food opens none", async () => {
+        const { sql } = getCtx();
+        const eggs = await seedFood(sql, householdId, { name: "Eggs" });
+        await seedFood(sql, householdId, { name: "Milk" });
+        const elsewhere = await seedHousehold(sql);
+        const theirs = await seedFood(sql, elsewhere.householdId, {
+            name: "Secret sauce",
+        });
+        const page = await get(users.member, `/settings/saved?food=${eggs}`);
+        expect(page.status).toBe(200);
+        const sheet = (await page.text()).match(
+            /<dialog[^>]*id="fd-saved-edit"[\s\S]*?<\/dialog>/,
+        )![0];
+        expect(sheet).toContain("data-sheet-open-on-load");
+        expect(sheet).toContain(`action="/settings/household/items/${eggs}"`);
+        expect(sheet).toMatch(/name="name"[^>]*value="Eggs"/);
+        for (const id of [crypto.randomUUID(), "nonsense", theirs]) {
+            const none = await get(users.member, `/settings/saved?food=${id}`);
+            expect(none.status).toBe(200);
+            const html = await none.text();
+            expect(html).not.toContain("data-sheet-open-on-load");
+            expect(html).not.toContain("Secret sauce");
+        }
+        // Without it the page is as it was: no sheet open.
+        expect(await (await get(users.member)).text()).not.toContain(
+            "data-sheet-open-on-load",
+        );
+    });
+
     test("a refused edit answers 400 and reopens the one sheet with that food and the refusal", async () => {
         const { sql } = getCtx();
         const eggs = await seedFood(sql, householdId, { name: "Eggs" });

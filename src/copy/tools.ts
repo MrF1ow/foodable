@@ -928,6 +928,7 @@ const TOOLS_BASE: ToolIdentity[] = [
             { name: "amount", required: false },
             { name: "unit", required: false },
             { name: "note", required: false },
+            { name: "food_id", required: false },
         ],
         hasPhotoHint: false,
     },

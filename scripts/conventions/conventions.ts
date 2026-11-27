@@ -379,6 +379,8 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/web/pages/v2/recipes-page-cook.ts": "web",
     "src/web/pages/v2/recipes-page-cook.test.ts": "web",
     "src/web/pages/v2/recipes-page-mentions.ts": "web",
+    "src/web/pages/v2/recipes-page-ingredients.ts": "web",
+    "src/web/pages/v2/recipes-page-ingredients.test.ts": "web",
     "src/web/pages/v2/gate.ts": "web",
     "src/web/pages/v2/share-sheet.ts": "web",
     "src/web/pages/v2/share-sheet.test.ts": "web",

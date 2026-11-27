@@ -24,6 +24,7 @@ import {
     addRecipeToGrocery,
     createRecipe,
     deleteRecipe,
+    editRecipeIngredient,
     getRecipeView,
     importRecipeFromText,
     listRecipes,
@@ -34,7 +35,6 @@ import {
     recipeNotices,
     setPersonPortion,
     updateRecipe,
-    updateRecipeIngredient,
     type Recipe,
     recipeSteps,
     resolveTotalPortions,
@@ -2142,7 +2142,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Update Recipe Ingredient",
             description:
-                "Update a recipe ingredient amount, unit, or note (for example diced or room temp). Leave amount null for to-taste / never-measured ingredients; never send 0.",
+                "Update a recipe ingredient amount, unit, or note (for example diced or room temp), or swap its food with food_id (the line keeps its place, note and amount unless you send them). Leave amount null for to-taste / never-measured ingredients; never send 0.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -2155,6 +2155,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                 amount: z.coerce.number().nullable().optional(),
                 unit: z.string().optional(),
                 note: z.string().nullable().optional(),
+                food_id: z.string().optional(),
             }),
         },
         async (args) =>
@@ -2162,17 +2163,20 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                 "update_recipe_ingredient",
                 async () => {
                     const householdId = await callerHouseholdId();
-                    const ingredient = await updateRecipeIngredient(
+                    const ingredient = await editRecipeIngredient(
                         liveRecipesStore(),
-                        householdId,
-                        args.recipe_id,
-                        args.ingredient_id,
+                        liveFoodsStore(),
                         {
+                            householdId,
+                            recipeId: args.recipe_id,
+                            ingredientId: args.ingredient_id,
                             amount: args.amount,
                             unit: args.unit,
                             note: args.note,
+                            ...(args.food_id
+                                ? { food: { foodId: args.food_id } }
+                                : {}),
                         },
-                        liveFoodsStore(),
                     );
                     return {
                         content: [
