@@ -113,7 +113,26 @@ function scaleNullable(value: number | null, factor: number): number | null {
     return value * factor;
 }
 
-/** Free-text meal: scale stored totals by servings (1 = as logged). */
+/** The most servings the edit sheet takes (the column holds 9999.99). */
+const MAX_SERVINGS = 999;
+
+/** What a quick or free-text meal was last saved at; null or unusable is 1. */
+export function mealServings(meal: Pick<Meal, "servings">): number {
+    const s = meal.servings;
+    return s != null && Number.isFinite(s) && s > 0 ? s : 1;
+}
+
+function scaleGrams(value: number | null, factor: number): number | null {
+    const scaled = scaleNullable(value, factor);
+    return scaled == null ? null : Math.round(scaled * 100) / 100;
+}
+
+/**
+ * Quick or free-text meal: the totals for `servings`. The stored totals are
+ * already at the meal's own servings (null reads as 1), so one serving is
+ * `totals / meal.servings` and the new totals are that times `servings`. That
+ * keeps a second save at 2 from doubling the first.
+ */
 export function scaleMealTotals(
     meal: Pick<
         Meal,
@@ -125,6 +144,7 @@ export function scaleMealTotals(
         | "sugar_g"
         | "alcohol_g"
         | "caffeine_mg"
+        | "servings"
     >,
     servings: number,
 ): MacroTileValues & {
@@ -136,16 +156,20 @@ export function scaleMealTotals(
     if (!Number.isFinite(servings) || servings <= 0) {
         throw new Error("Enter servings greater than zero.");
     }
+    if (servings > MAX_SERVINGS) {
+        throw new Error(`Enter ${MAX_SERVINGS} servings or fewer.`);
+    }
+    const factor = servings / mealServings(meal);
     return {
         calories:
-            meal.calories == null ? null : Math.round(meal.calories * servings),
-        protein_g: scaleNullable(meal.protein_g, servings),
-        carbs_g: scaleNullable(meal.carbs_g, servings),
-        fat_g: scaleNullable(meal.fat_g, servings),
-        fiber_g: scaleNullable(meal.fiber_g, servings),
-        sugar_g: scaleNullable(meal.sugar_g, servings),
-        alcohol_g: scaleNullable(meal.alcohol_g, servings),
-        caffeine_mg: scaleNullable(meal.caffeine_mg, servings),
+            meal.calories == null ? null : Math.round(meal.calories * factor),
+        protein_g: scaleGrams(meal.protein_g, factor),
+        carbs_g: scaleGrams(meal.carbs_g, factor),
+        fat_g: scaleGrams(meal.fat_g, factor),
+        fiber_g: scaleGrams(meal.fiber_g, factor),
+        sugar_g: scaleGrams(meal.sugar_g, factor),
+        alcohol_g: scaleGrams(meal.alcohol_g, factor),
+        caffeine_mg: scaleGrams(meal.caffeine_mg, factor),
     };
 }
 

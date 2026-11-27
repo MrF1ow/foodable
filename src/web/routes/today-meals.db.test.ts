@@ -1,4 +1,11 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import {
+    afterEach,
+    beforeEach,
+    expect,
+    spyOn,
+    test,
+    type Mock,
+} from "bun:test";
 import type { SQL } from "bun";
 import { Hono } from "hono";
 import { resetFlagsForTests } from "../../flags.js";
@@ -24,6 +31,7 @@ import { mealWriteFromItems, resolveWriteTimestamp } from "../../meal-write.js";
 import { nutritionRoutes } from "./nutrition.js";
 import { logRoutes } from "./log.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
+import { renderTodayEditSheet } from "../pages/v2/today-edit-sheet.js";
 
 const SESSION = "01234567890123456789012345678901";
 process.env.SESSION_SECRET ||= SESSION;
@@ -740,15 +748,26 @@ function councilEditBody(fields: Record<string, string>): string {
 describeDb(pgAvailable !== null, "council r3 meal edit", (getCtx) => {
     let userId: string;
     let householdId: string;
+    // `bun test` runs every file in one process, and foods.test.ts and
+    // food-search.test.ts set OFF_USER_AGENT for good at import. The log search
+    // below leaves Open Food Facts on (the off-lookups kill switch defaults on,
+    // and a two-letter query has fewer than five household hits), so in a full
+    // run it made a live request whose latency decided whether the test beat
+    // its 5 s timeout. No file here may touch the network.
+    let fetchSpy: Mock<typeof fetch>;
 
     beforeEach(async () => {
         const { sql, truncateAll } = getCtx();
         await truncateAll();
         setSqlForTests(sql);
         ({ userId, householdId } = await seedHousehold(sql));
+        fetchSpy = spyOn(globalThis, "fetch").mockRejectedValue(
+            new Error("no network in db tests"),
+        ) as Mock<typeof fetch>;
     });
 
     afterEach(() => {
+        fetchSpy.mockRestore();
         setSqlForTests(null);
         resetFlagsForTests();
     });
@@ -1214,5 +1233,173 @@ describeDb(pgAvailable !== null, "council r3 meal edit", (getCtx) => {
             headers: { cookie },
         });
         expect(search.status).toBe(200);
+    });
+});
+
+describeDb(pgAvailable !== null, "quick meal servings", (getCtx) => {
+    let userId: string;
+    let householdId: string;
+
+    beforeEach(async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        setSqlForTests(sql);
+        ({ userId, householdId } = await seedHousehold(sql));
+    });
+
+    afterEach(() => {
+        setSqlForTests(null);
+    });
+
+    async function saveSheet(
+        mealId: string,
+        fields: Record<string, string>,
+    ): Promise<Response> {
+        const web = new Hono();
+        web.route("/", nutritionRoutes);
+        return web.request(`http://test/meals/${mealId}/edit`, {
+            method: "POST",
+            headers: {
+                cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}`,
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                meal_type: "dinner",
+                logged_time: "18:00",
+                date: "2026-03-01",
+                return_to: "/?date=2026-03-01",
+                ...fields,
+            }).toString(),
+        });
+    }
+
+    async function reopened(mealId: string) {
+        const loaded = await getMealById(userId, mealId);
+        const html = renderTodayEditSheet(loaded!, {
+            day: "2026-03-01",
+            tz: "UTC",
+        });
+        const input = /<input[^>]*name="servings"[^>]*>/.exec(html)?.[0] ?? "";
+        return {
+            meal: loaded!,
+            shown: /value="([^"]*)"/.exec(input)?.[1] ?? null,
+        };
+    }
+
+    async function quickMeal() {
+        const { meal } = await insertMeal(userId, {
+            description: "Pasta plate",
+            meal_type: "dinner",
+            logged_at: "2026-03-01T18:00:00.000Z",
+            calories: 300,
+            protein_g: 20,
+            carbs_g: 40,
+            fat_g: 10,
+            fiber_g: 4,
+            idempotency_key: "test:quick-servings",
+        });
+        return meal;
+    }
+
+    test("a quick meal saved at 2 servings reopens at 2, and 3 is three times one serving", async () => {
+        const meal = await quickMeal();
+        expect((await reopened(meal.id)).shown).toBe("1");
+
+        expect((await saveSheet(meal.id, { servings: "2" })).status).toBe(303);
+        const two = await reopened(meal.id);
+        expect(two.shown).toBe("2");
+        expect(two.meal.servings).toBe(2);
+        expect(two.meal.calories).toBe(600);
+        expect(two.meal.protein_g).toBe(40);
+
+        // The sheet opened at 2; saving at 3 rescales from one serving (300),
+        // not from the 600 the last save left, so it is 900 and not 1800.
+        expect((await saveSheet(meal.id, { servings: "3" })).status).toBe(303);
+        const three = await reopened(meal.id);
+        expect(three.shown).toBe("3");
+        expect(three.meal.servings).toBe(3);
+        expect(three.meal.calories).toBe(900);
+        expect(three.meal.protein_g).toBe(60);
+        expect(three.meal.carbs_g).toBe(120);
+        expect(three.meal.fat_g).toBe(30);
+        expect(three.meal.fiber_g).toBe(12);
+    });
+
+    test("saving again at the servings it opened with changes nothing", async () => {
+        const meal = await quickMeal();
+        await saveSheet(meal.id, { servings: "2" });
+        await saveSheet(meal.id, { servings: "2", meal_type: "lunch" });
+        const after = await reopened(meal.id);
+        expect(after.shown).toBe("2");
+        expect(after.meal.calories).toBe(600);
+        expect(after.meal.meal_type).toBe("lunch");
+        // And back to one serving.
+        await saveSheet(meal.id, { servings: "1" });
+        const one = await reopened(meal.id);
+        expect(one.meal.calories).toBe(300);
+        expect(one.meal.servings).toBe(1);
+    });
+
+    test("a save at one serving leaves an untouched meal's totals and servings alone", async () => {
+        const { meal } = await insertMeal(userId, {
+            description: "Odd figures",
+            meal_type: "dinner",
+            logged_at: "2026-03-01T18:00:00.000Z",
+            calories: 301,
+            protein_g: 20.123,
+            idempotency_key: "test:quick-untouched",
+        });
+        await saveSheet(meal.id, { servings: "1" });
+        const after = await getMealById(userId, meal.id);
+        expect(after!.protein_g).toBe(20.123);
+        expect(after!.servings).toBeNull();
+    });
+
+    test("servings past the limit are refused on the sheet", async () => {
+        const meal = await quickMeal();
+        const res = await saveSheet(meal.id, { servings: "1000" });
+        expect(res.status).toBe(400);
+        expect((await getMealById(userId, meal.id))!.calories).toBe(300);
+    });
+
+    test("an item-backed meal still reopens at the amount it was saved with", async () => {
+        const { sql } = getCtx();
+        const foodId = await seedFoodWithNutrition(sql, householdId, {
+            name: "Egg",
+            calories: 80,
+            protein_g: 6,
+            grams_per_each: 50,
+        });
+        const computed = await mealWriteFromItems(householdId, [
+            { foodId, amount: 1, unit: "each" },
+        ]);
+        const { meal } = await insertMeal(userId, {
+            meal_type: "lunch",
+            logged_at: "2026-03-01T12:00:00.000Z",
+            description: computed.description,
+            ...computed.totals,
+            items: computed.items,
+            item_digest: computed.item_digest,
+        });
+        const before = await getMealById(userId, meal.id);
+        const itemId = before!.items![0]!.id;
+        expect(
+            (
+                await saveSheet(meal.id, {
+                    meal_type: "lunch",
+                    logged_time: "12:00",
+                    [`item_amount_${itemId}`]: "3",
+                })
+            ).status,
+        ).toBe(303);
+        const after = await reopened(meal.id);
+        expect(after.shown).toBeNull();
+        expect(after.meal.servings).toBeNull();
+        expect(after.meal.items![0]!.amount).toBe(3);
+        const html = renderTodayEditSheet(after.meal, {
+            day: "2026-03-01",
+            tz: "UTC",
+        });
+        expect(html).toMatch(/name="item_amount_[^"]*" value="3"/);
     });
 });
